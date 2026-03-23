@@ -53,21 +53,21 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         ],
       ),
       GoRoute(
-        path: RouteNames.novelDetail,
+        path: RouteNames.novelDetailPath,
         builder: (_, state) => NovelDetailScreen(
-          novelId: state.uri.queryParameters['id'] ?? '',
+          novelId: state.pathParameters['id'] ?? '',
         ),
       ),
       GoRoute(
-        path: RouteNames.reader,
+        path: RouteNames.readerPath,
         builder: (_, state) => ReaderScreen(
-          chapterId: state.uri.queryParameters['chapterId'] ?? '',
+          chapterId: state.pathParameters['chapterId'] ?? '',
         ),
       ),
       GoRoute(
-        path: RouteNames.comments,
+        path: RouteNames.commentsPath,
         builder: (_, state) => CommentsScreen(
-          novelId: state.uri.queryParameters['novelId'] ?? '',
+          novelId: state.pathParameters['novelId'] ?? '',
           chapterId: state.uri.queryParameters['chapterId'],
         ),
       ),
