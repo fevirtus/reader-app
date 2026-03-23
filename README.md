@@ -17,3 +17,16 @@ Flutter mobile app for reading novels, synced with the existing web platform.
 - Bookshelf tabs: Dang doc, Danh dau, Da doc, De cu.
 - Comments, ratings, and user recommendations.
 - Native TTS and offline reading support.
+
+## Architecture
+
+- `lib/core`: app-wide config, network, storage, and theme.
+- `lib/features`: feature modules split by domain.
+- `lib/shared`: shared UI widgets.
+
+## Run
+
+```bash
+flutter pub get
+flutter run
+```
