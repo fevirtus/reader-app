@@ -27,8 +27,8 @@ class BookshelfScreen extends ConsumerWidget {
               const Text('Vui lòng đăng nhập để xem tủ sách'),
               const SizedBox(height: 16),
               FilledButton(
-                onPressed: () => context.push(RouteNames.login),
-                child: const Text('Đăng nhập'),
+                onPressed: () => ref.read(authProvider.notifier).signInWithGoogle(),
+                child: const Text('Đăng nhập bằng Google'),
               ),
             ],
           ),

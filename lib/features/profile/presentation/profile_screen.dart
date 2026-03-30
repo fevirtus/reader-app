@@ -13,107 +13,130 @@ class ProfileScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final authState = ref.watch(authProvider);
     final bookshelfAsync = ref.watch(bookshelfProvider);
+    final bookmarkedCount =
+        bookshelfAsync.maybeWhen(data: (items) => items.length, orElse: () => 0);
+    final displayName = authState is AuthAuthenticated
+      ? ((authState.user.name != null && authState.user.name!.trim().isNotEmpty)
+        ? authState.user.name!.trim()
+        : authState.user.email)
+      : '';
 
     return Scaffold(
       appBar: AppBar(title: const Text('Tài khoản')),
-      body: authState.maybeWhen(
-        authenticated: (user) => SingleChildScrollView(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            children: [
-              // User Avatar & Basic Info
-              Container(
-                padding: const EdgeInsets.all(20),
-                decoration: BoxDecoration(
-                  color: Theme.of(context).colorScheme.primaryContainer,
-                  borderRadius: BorderRadius.circular(12),
+      body: switch (authState) {
+        AuthAuthenticated(:final user) => SingleChildScrollView(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              children: [
+                // User Avatar & Basic Info
+                Container(
+                  padding: const EdgeInsets.all(20),
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).colorScheme.primaryContainer,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Column(
+                    children: [
+                      CircleAvatar(
+                        radius: 40,
+                        backgroundImage:
+                            user.image != null ? NetworkImage(user.image!) : null,
+                        child: user.image == null
+                            ? Text(
+                            displayName[0].toUpperCase(),
+                                style:
+                                    Theme.of(context).textTheme.headlineMedium,
+                              )
+                            : null,
+                      ),
+                      const SizedBox(height: 12),
+                      Text(
+                        displayName,
+                        style: Theme.of(context).textTheme.titleLarge,
+                        textAlign: TextAlign.center,
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        user.email,
+                        style: Theme.of(context).textTheme.bodyMedium,
+                        textAlign: TextAlign.center,
+                      ),
+                    ],
+                  ),
                 ),
-                child: Column(
+                const SizedBox(height: 24),
+
+                // Stats Cards
+                Row(
                   children: [
-                    CircleAvatar(
-                      radius: 40,
-                      backgroundImage: user.image != null
-                          ? NetworkImage(user.image!)
-                          : null,
-                      child: user.image == null
-                          ? Text(
-                              user.name.isNotEmpty
-                                  ? user.name[0].toUpperCase()
-                                  : '?',
-                              style: Theme.of(context).textTheme.headlineMedium,
-                            )
-                          : null,
+                    Expanded(
+                      child: _buildStatCard(
+                        context: context,
+                        label: 'Sách Đánh Dấu',
+                        count: bookmarkedCount,
+                      ),
                     ),
-                    const SizedBox(height: 12),
-                    Text(
-                      user.name,
-                      style: Theme.of(context).textTheme.titleLarge,
-                      textAlign: TextAlign.center,
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      user.email,
-                      style: Theme.of(context).textTheme.bodyMedium,
-                      textAlign: TextAlign.center,
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: _buildStatCard(
+                        context: context,
+                        label: 'Đang Đọc',
+                        count: bookmarkedCount,
+                      ),
                     ),
                   ],
                 ),
-              ),
-              const SizedBox(height: 24),
+                const SizedBox(height: 24),
 
-              // Stats Cards
-              Row(
-                children: [
-                  Expanded(
-                    child: _buildStatCard(
-                      context: context,
-                      label: 'Sách Đánh Dấu',
-                      count: bookshelfAsync.whenData((b) => b.length).value ?? 0,
-                    ),
+                // Settings Button
+                SizedBox(
+                  width: double.infinity,
+                  child: FilledButton.icon(
+                    onPressed: () => context.push(RouteNames.settings),
+                    icon: const Icon(Icons.tune),
+                    label: const Text('Cài Đặt Đọc'),
                   ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: _buildStatCard(
-                      context: context,
-                      label: 'Đang Đọc',
-                      count: bookshelfAsync
-                              .whenData((b) => b.where((x) => true).length)
-                              .value ??
-                          0,
-                    ),
+                ),
+                const SizedBox(height: 12),
+
+                // Logout Button
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    onPressed: () async {
+                      await ref.read(authProvider.notifier).signOut();
+                      if (context.mounted) context.go(RouteNames.home);
+                    },
+                    icon: const Icon(Icons.logout),
+                    label: const Text('Đăng Xuất'),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        AuthError(:final message) => Center(child: Text(message)),
+        AuthUnauthenticated() => Center(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  FilledButton(
+                    onPressed: () => ref.read(authProvider.notifier).signInWithGoogle(),
+                    child: const Text('Đăng nhập bằng Google'),
+                  ),
+                  const SizedBox(height: 12),
+                  OutlinedButton.icon(
+                    onPressed: () => context.push(RouteNames.settings),
+                    icon: const Icon(Icons.tune),
+                    label: const Text('Mở Cài Đặt Đọc'),
                   ),
                 ],
               ),
-              const SizedBox(height: 24),
-
-              // Settings Button
-              SizedBox(
-                width: double.infinity,
-                child: FilledButton.icon(
-                  onPressed: () => context.push(RouteNames.settings),
-                  icon: const Icon(Icons.tune),
-                  label: const Text('Cài Đặt Đọc'),
-                ),
-              ),
-              const SizedBox(height: 12),
-
-              // Logout Button
-              SizedBox(
-                width: double.infinity,
-                child: OutlinedButton.icon(
-                  onPressed: () async {
-                    await ref.read(authProvider.notifier).signOut();
-                    if (context.mounted) context.go(RouteNames.login);
-                  },
-                  icon: const Icon(Icons.logout),
-                  label: const Text('Đăng Xuất'),
-                ),
-              ),
-            ],
+            ),
           ),
-        ),
-        orElse: () => const Center(child: CircularProgressIndicator()),
-      ),
+        _ => const Center(child: CircularProgressIndicator()),
+      },
     );
   }
 

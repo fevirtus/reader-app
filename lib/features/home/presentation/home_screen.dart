@@ -33,6 +33,16 @@ class HomeScreen extends ConsumerWidget {
               const Icon(Icons.error_outline, size: 48),
               const SizedBox(height: 12),
               Text('Lỗi tải dữ liệu', style: Theme.of(context).textTheme.bodyLarge),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(24, 8, 24, 0),
+                child: Text(
+                  e.toString(),
+                  textAlign: TextAlign.center,
+                  maxLines: 3,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              ),
               TextButton(
                 onPressed: () => ref.invalidate(homeProvider),
                 child: const Text('Thử lại'),
@@ -138,8 +148,9 @@ class _CarouselCard extends StatelessWidget {
               CachedNetworkImage(
                 imageUrl: novel.coverUrl!,
                 fit: BoxFit.cover,
-                placeholder: (_, __) => Container(color: Colors.grey[200]),
-                errorWidget: (_, __, ___) => Container(color: Colors.grey[300]),
+                placeholder: (_, imageUrl) => Container(color: Colors.grey[200]),
+                errorWidget: (_, imageUrl, error) =>
+                    Container(color: Colors.grey[300]),
               )
             else
               Container(color: Theme.of(context).colorScheme.primaryContainer),
@@ -188,7 +199,7 @@ class _NovelHorizontalList extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 16),
         scrollDirection: Axis.horizontal,
         itemCount: novels.length,
-        separatorBuilder: (_, __) => const SizedBox(width: 12),
+        separatorBuilder: (_, separatorIndex) => const SizedBox(width: 12),
         itemBuilder: (context, index) {
           final novel = novels[index];
           return GestureDetector(

@@ -5,11 +5,28 @@ import 'package:go_router/go_router.dart';
 import '../../../app/router/route_names.dart';
 import '../providers/auth_provider.dart';
 
-class LoginScreen extends ConsumerWidget {
+class LoginScreen extends ConsumerStatefulWidget {
   const LoginScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<LoginScreen> createState() => _LoginScreenState();
+}
+
+class _LoginScreenState extends ConsumerState<LoginScreen> {
+  bool _startedSignIn = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || _startedSignIn) return;
+      _startedSignIn = true;
+      ref.read(authProvider.notifier).signInWithGoogle();
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final authState = ref.watch(authProvider);
 
     ref.listen<AuthState>(authProvider, (_, next) {
@@ -41,6 +58,16 @@ class LoginScreen extends ConsumerWidget {
                 if (errorMsg != null) ...[
                   Text(errorMsg, style: const TextStyle(color: Colors.red)),
                   const SizedBox(height: 16),
+                ],
+                if (authState is AuthLoading) ...[
+                  const SizedBox(
+                    width: 22,
+                    height: 22,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
+                  const SizedBox(height: 12),
+                  const Text('Đang mở Google Sign-In...'),
+                  const SizedBox(height: 20),
                 ],
                 FilledButton.icon(
                   onPressed: isLoading

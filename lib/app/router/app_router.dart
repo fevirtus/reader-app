@@ -61,7 +61,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: RouteNames.readerPath,
         builder: (_, state) => ReaderScreen(
-          chapterId: state.pathParameters['chapterId'] ?? '',
+          chapterId: Uri.decodeComponent(state.pathParameters['chapterId'] ?? ''),
         ),
       ),
       GoRoute(

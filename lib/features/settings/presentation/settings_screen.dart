@@ -98,7 +98,7 @@ class SettingsScreen extends ConsumerWidget {
                     style: TextStyle(color: Colors.red)),
                 onTap: () async {
                   await ref.read(authProvider.notifier).signOut();
-                  if (context.mounted) context.go(RouteNames.login);
+                  if (context.mounted) context.go(RouteNames.home);
                 },
               ),
           ],

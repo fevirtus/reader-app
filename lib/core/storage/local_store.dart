@@ -7,6 +7,10 @@ class LocalStore {
   static const _kLineHeight = 'reader_line_height';
   static const _kLetterSpacing = 'reader_letter_spacing';
   static const _kFontFamily = 'reader_font_family';
+  static const _kThemePreset = 'reader_theme_preset';
+  static const _kHorizontalPadding = 'reader_horizontal_padding';
+  static const _kParagraphSpacing = 'reader_paragraph_spacing';
+  static const _kTextAlign = 'reader_text_align';
   static const _kProgressChapterId = 'progress_chapter_id_';
   static const _kProgressChapterNum = 'progress_chapter_num_';
   static const _kProgressOffset = 'progress_offset_';
@@ -19,6 +23,10 @@ class LocalStore {
     await prefs.setDouble(_kLineHeight, settings.lineHeight);
     await prefs.setDouble(_kLetterSpacing, settings.letterSpacing);
     await prefs.setString(_kFontFamily, settings.fontFamily);
+    await prefs.setString(_kThemePreset, settings.themePreset);
+    await prefs.setDouble(_kHorizontalPadding, settings.horizontalPadding);
+    await prefs.setDouble(_kParagraphSpacing, settings.paragraphSpacing);
+    await prefs.setString(_kTextAlign, settings.textAlign);
   }
 
   Future<ReadingSettings?> loadReadingSettings() async {
@@ -29,6 +37,10 @@ class LocalStore {
       lineHeight: prefs.getDouble(_kLineHeight) ?? 1.8,
       letterSpacing: prefs.getDouble(_kLetterSpacing) ?? 0,
       fontFamily: prefs.getString(_kFontFamily) ?? 'serif',
+      themePreset: prefs.getString(_kThemePreset) ?? 'paper',
+      horizontalPadding: prefs.getDouble(_kHorizontalPadding) ?? 20,
+      paragraphSpacing: prefs.getDouble(_kParagraphSpacing) ?? 24,
+      textAlign: prefs.getString(_kTextAlign) ?? 'justify',
     );
   }
 

@@ -41,13 +41,24 @@ class NovelModel extends Equatable {
   final SeriesModel? series;
   final LatestChapterInfo? latestChapter;
 
+  static String _stringValue(dynamic value, {String fallback = ''}) {
+    if (value is String) return value;
+    if (value == null) return fallback;
+    return value.toString();
+  }
+
+  static int _intValue(dynamic value, {int fallback = 0}) {
+    if (value is num) return value.toInt();
+    return fallback;
+  }
+
   factory NovelModel.fromJson(Map<String, dynamic> json) => NovelModel(
-        id: json['id'] as String,
-        title: json['title'] as String,
-        slug: json['slug'] as String,
-        authorName: json['authorName'] as String,
-        status: json['status'] as String,
-        totalChapters: (json['totalChapters'] as num).toInt(),
+        id: _stringValue(json['id']),
+        title: _stringValue(json['title'], fallback: 'Không rõ tiêu đề'),
+        slug: _stringValue(json['slug']),
+        authorName: _stringValue(json['authorName'], fallback: 'Chưa rõ tác giả'),
+        status: _stringValue(json['status'], fallback: 'Đang ra'),
+        totalChapters: _intValue(json['totalChapters']),
         originalTitle: json['originalTitle'] as String?,
         description: json['description'] as String?,
         coverUrl: json['coverUrl'] as String?,

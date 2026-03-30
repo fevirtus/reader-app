@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/models/chapter_model.dart';
 import '../../../core/models/reading_settings.dart';
@@ -21,8 +22,10 @@ final chapterProvider =
     unawaited(offlineCache.saveChapter(chapter));
     return chapter;
   } catch (_) {
+    debugPrint('[READER][CHAPTER][ERROR] Failed to load chapterId=$chapterId from network, trying cache');
     final cached = await offlineCache.loadChapter(chapterId);
     if (cached != null) return cached;
+    debugPrint('[READER][CHAPTER][ERROR] No cache for chapterId=$chapterId');
     rethrow;
   }
 });
@@ -57,7 +60,6 @@ class ReaderNotifier extends StateNotifier<ReadingProgress?> {
       chapterNumber: chapterNumber,
       scrollOffset: 0,
     );
-    _persistProgress(chapterId, chapterNumber, 0);
   }
   void updateScroll(double offset) {
     if (state == null) return;

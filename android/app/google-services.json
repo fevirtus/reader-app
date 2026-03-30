@@ -1,0 +1,47 @@
+{
+  "project_info": {
+    "project_number": "308259929553",
+    "project_id": "reader-1658c",
+    "storage_bucket": "reader-1658c.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:308259929553:android:9142ae16d9ddd8a91c34f0",
+        "android_client_info": {
+          "package_name": "com.example.reader_app"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "308259929553-6k3q1g76skt3id4e2mk9k6pr5l7gdtju.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.example.reader_app",
+            "certificate_hash": "fa21a3e6a319b71b2dd0ef9573b22046dba5d55c"
+          }
+        },
+        {
+          "client_id": "308259929553-9oame596io3s4lcj9cdb5db6v3i6f6rk.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBibgTrvBWtJBL4PGeIyahBwRlYKcjQ47k"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "308259929553-9oame596io3s4lcj9cdb5db6v3i6f6rk.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

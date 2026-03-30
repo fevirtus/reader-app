@@ -100,7 +100,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
                 // Genre filter
                 genresAsync.when(
                   loading: () => const SizedBox.shrink(),
-                  error: (_, __) => const SizedBox.shrink(),
+                  error: (_, error) => const SizedBox.shrink(),
                   data: (genres) => _FilterChipDropdown(
                     label: _selectedGenre == null
                         ? 'Thể loại'

@@ -29,10 +29,16 @@ class TtsPlayerWidget extends ConsumerWidget {
           if (!tts.isPlaying)
             IconButton.filled(
               icon: const Icon(Icons.play_arrow),
-              onPressed: () => notifier.startReading(
-                content,
-                paragraphIndex: tts.paragraphIndex,
-              ),
+              onPressed: () {
+                if (tts.status == TtsStatus.paused) {
+                  notifier.resume();
+                  return;
+                }
+                notifier.startReading(
+                  content,
+                  paragraphIndex: tts.paragraphIndex,
+                );
+              },
             )
           else
             IconButton.filled(
@@ -65,6 +71,23 @@ class TtsPlayerWidget extends ConsumerWidget {
               padding: const EdgeInsets.only(right: 8),
               child: Text(
                 '${tts.paragraphIndex + 1}/${tts.totalParagraphs}',
+                style: Theme.of(context).textTheme.labelSmall,
+              ),
+            ),
+          if (tts.voiceName != null)
+            Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: Text(
+                tts.voiceName!,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(context).textTheme.labelSmall,
+              ),
+            )
+          else
+            Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: Text(
+                tts.language,
                 style: Theme.of(context).textTheme.labelSmall,
               ),
             ),

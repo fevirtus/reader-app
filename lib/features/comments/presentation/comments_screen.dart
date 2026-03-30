@@ -72,7 +72,8 @@ class _CommentsScreenState extends ConsumerState<CommentsScreen> {
                 return ListView.separated(
                   padding: const EdgeInsets.symmetric(vertical: 8),
                   itemCount: comments.length,
-                  separatorBuilder: (_, __) => const Divider(height: 1),
+                  separatorBuilder: (_, separatorIndex) =>
+                      const Divider(height: 1),
                   itemBuilder: (context, index) =>
                       _CommentTile(comment: comments[index]),
                 );

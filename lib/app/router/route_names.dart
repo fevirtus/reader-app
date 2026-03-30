@@ -17,7 +17,7 @@ class RouteNames {
 
   // Navigation helpers
   static String novelDetail(String id) => '/novel/$id';
-  static String readerChapter(String chapterId) => '/reader/$chapterId';
+  static String readerChapter(String chapterId) => '/reader/${Uri.encodeComponent(chapterId)}';
   static String commentsFor(String novelId, {String? chapterId}) {
     final base = '/comments/$novelId';
     return chapterId != null ? '$base?chapterId=$chapterId' : base;

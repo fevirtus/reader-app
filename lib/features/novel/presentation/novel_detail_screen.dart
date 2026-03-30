@@ -58,7 +58,7 @@ class NovelDetailScreen extends ConsumerWidget {
                     // Read button
                     chaptersAsync.when(
                       loading: () => const SizedBox.shrink(),
-                      error: (_, __) => const SizedBox.shrink(),
+                      error: (_, error) => const SizedBox.shrink(),
                       data: (chapters) {
                         if (chapters.isEmpty) return const SizedBox.shrink();
                         final first = chapters.first;
@@ -102,7 +102,8 @@ class NovelDetailScreen extends ConsumerWidget {
                   child: Center(child: CircularProgressIndicator()),
                 ),
               ),
-              error: (_, __) => const SliverToBoxAdapter(child: SizedBox.shrink()),
+              error: (_, error) =>
+                  const SliverToBoxAdapter(child: SizedBox.shrink()),
               data: (chapters) => SliverList(
                 delegate: SliverChildBuilderDelegate(
                   (context, index) {

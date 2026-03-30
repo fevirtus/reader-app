@@ -1,6 +1,8 @@
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_sign_in/google_sign_in.dart';
+import 'package:flutter/services.dart';
 
 import '../../../core/config/app_config.dart';
 import '../../../core/models/user_model.dart';
@@ -38,10 +40,26 @@ class AuthNotifier extends StateNotifier<AuthState> {
 
   SecureStore get _store => _ref.read(secureStoreProvider);
 
-  final GoogleSignIn _googleSignIn = GoogleSignIn(
-    clientId: AppConfig.googleClientId.isNotEmpty ? AppConfig.googleClientId : null,
-    scopes: ['email', 'profile'],
-  );
+  GoogleSignIn get _googleSignIn => GoogleSignIn(
+        // clientId should be set for iOS/web only. Android reads from google-services.json.
+        clientId: (!kIsWeb && defaultTargetPlatform == TargetPlatform.android)
+            ? null
+            : (AppConfig.googleClientId.isNotEmpty ? AppConfig.googleClientId : null),
+        // ID token for backend verification typically requires a Web OAuth client id.
+        serverClientId: AppConfig.googleServerClientId.isNotEmpty
+            ? AppConfig.googleServerClientId
+            : (AppConfig.googleClientId.isNotEmpty ? AppConfig.googleClientId : null),
+        scopes: ['email', 'profile'],
+      );
+
+  void _logGoogleSignInConfig() {
+    final isAndroid = !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
+    debugPrint(
+      '[AUTH][GOOGLE][CONFIG] platform=${isAndroid ? 'android' : (kIsWeb ? 'web' : defaultTargetPlatform.name)} '
+      'clientId=${isAndroid ? '<android-default>' : (AppConfig.googleClientId.isNotEmpty ? AppConfig.googleClientId : '<empty>')} '
+      'serverClientId=${AppConfig.googleServerClientId.isNotEmpty ? AppConfig.googleServerClientId : (AppConfig.googleClientId.isNotEmpty ? AppConfig.googleClientId : '<empty>')}',
+    );
+  }
 
   Future<void> _restore() async {
     final token = await _store.getAccessToken();
@@ -66,6 +84,7 @@ class AuthNotifier extends StateNotifier<AuthState> {
   Future<void> signInWithGoogle() async {
     try {
       state = AuthLoading();
+      _logGoogleSignInConfig();
       final account = await _googleSignIn.signIn();
       if (account == null) {
         state = AuthUnauthenticated();
@@ -94,10 +113,28 @@ class AuthNotifier extends StateNotifier<AuthState> {
       state = AuthAuthenticated(
         UserModel.fromJson(data['user'] as Map<String, dynamic>),
       );
-    } on DioException catch (e) {
+    } on PlatformException catch (e, st) {
+      debugPrint('[AUTH][GOOGLE][ERROR] code=${e.code} message=${e.message} details=${e.details}');
+      debugPrintStack(stackTrace: st);
+      final raw = '${e.code} ${e.message ?? ''} ${e.details ?? ''}'.toLowerCase();
+      if (raw.contains('10') || raw.contains('developer_error')) {
+        state = AuthError(
+          'Google Sign-In lỗi cấu hình (code 10). Cần kiểm tra package name, SHA-1/SHA-256 và google-services.json cho Android.',
+        );
+      } else {
+        state = AuthError('Google Sign-In thất bại: ${e.message ?? e.code}');
+      }
+    } on DioException catch (e, st) {
+      debugPrint('[AUTH][API][ERROR] type=${e.type} message=${e.message}');
+      if (e.response != null) {
+        debugPrint('[AUTH][API][ERROR] status=${e.response?.statusCode} data=${e.response?.data}');
+      }
+      debugPrintStack(stackTrace: st);
       final msg = (e.response?.data as Map?)?['error'] ?? e.message ?? 'Login failed';
       state = AuthError(msg.toString());
-    } catch (e) {
+    } catch (e, st) {
+      debugPrint('[AUTH][UNEXPECTED][ERROR] $e');
+      debugPrintStack(stackTrace: st);
       state = AuthError(e.toString());
     }
   }
