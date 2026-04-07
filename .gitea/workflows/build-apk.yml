@@ -30,8 +30,18 @@ jobs:
         with:
           channel: stable
 
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK packages
+        run: |
+          sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+          yes | sdkmanager --licenses
+
       - name: Show Flutter and Dart version
-        run: flutter --version
+        run: |
+          flutter --version
+          flutter doctor -v
 
       - name: Install dependencies
         run: flutter pub get
