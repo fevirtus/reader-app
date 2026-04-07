@@ -144,6 +144,11 @@ class AuthNotifier extends StateNotifier<AuthState> {
     await _store.clear();
     state = AuthUnauthenticated();
   }
+
+  Future<void> handleSessionExpired() async {
+    await _store.clear();
+    state = AuthUnauthenticated();
+  }
 }
 
 final authProvider = StateNotifierProvider<AuthNotifier, AuthState>((ref) {

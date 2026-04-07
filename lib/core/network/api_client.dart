@@ -7,6 +7,7 @@ class ApiClient {
   ApiClient({
     required String baseUrl,
     required SecureStore secureStore,
+    this.onSessionExpired,
   })  : _secureStore = secureStore,
         dio = Dio(
           BaseOptions(
@@ -35,6 +36,13 @@ class ApiClient {
           handler.next(response);
         },
         onError: (error, handler) {
+          final statusCode = error.response?.statusCode;
+          final path = error.requestOptions.path;
+
+          if ((statusCode == 401 || statusCode == 403) && !_isAuthEndpoint(path)) {
+            _handleSessionExpired();
+          }
+
           debugPrint(
             '[API][ERROR] ${error.requestOptions.method} ${error.requestOptions.baseUrl}${error.requestOptions.path} '
             '-> ${error.type}: ${error.message}',
@@ -47,4 +55,21 @@ class ApiClient {
 
   final Dio dio;
   final SecureStore _secureStore;
+  final VoidCallback? onSessionExpired;
+  DateTime? _lastSessionExpiredAt;
+
+  bool _isAuthEndpoint(String path) {
+    return path.contains('/api/auth/mobile-login');
+  }
+
+  void _handleSessionExpired() {
+    final now = DateTime.now();
+    if (_lastSessionExpiredAt != null &&
+        now.difference(_lastSessionExpiredAt!) < const Duration(seconds: 2)) {
+      return;
+    }
+    _lastSessionExpiredAt = now;
+    _secureStore.clear();
+    onSessionExpired?.call();
+  }
 }

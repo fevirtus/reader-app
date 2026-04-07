@@ -5,18 +5,47 @@ import 'package:go_router/go_router.dart';
 
 import '../../../app/router/route_names.dart';
 import '../../../core/models/novel_model.dart';
+import '../../../core/storage/local_store.dart';
 import '../../bookshelf/providers/bookshelf_provider.dart';
 import '../providers/novels_provider.dart';
 
-class NovelDetailScreen extends ConsumerWidget {
+final novelReadProgressProvider =
+    FutureProvider.family<Map<String, dynamic>?, String>((ref, novelId) async {
+  final localStore = ref.read(localStoreProvider);
+  return localStore.loadProgress(novelId);
+});
+
+class NovelDetailScreen extends ConsumerStatefulWidget {
   const NovelDetailScreen({super.key, required this.novelId});
 
   final String novelId;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<NovelDetailScreen> createState() => _NovelDetailScreenState();
+}
+
+class _NovelDetailScreenState extends ConsumerState<NovelDetailScreen> {
+  int _currentPage = 1;
+
+  @override
+  void didUpdateWidget(covariant NovelDetailScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.novelId != widget.novelId && _currentPage != 1) {
+      setState(() => _currentPage = 1);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final novelId = widget.novelId;
     final novelAsync = ref.watch(novelDetailProvider(novelId));
-    final chaptersAsync = ref.watch(chapterListProvider(novelId));
+    final chaptersAsync = ref.watch(
+      chapterListProvider(ChapterListQuery(novelId: novelId, page: _currentPage)),
+    );
+    final firstChapterAsync = ref.watch(
+      chapterListProvider(ChapterListQuery(novelId: novelId, page: 1)),
+    );
+    final readProgressAsync = ref.watch(novelReadProgressProvider(novelId));
     final isBookmarked = ref.watch(isBookmarkedProvider(novelId));
 
     return Scaffold(
@@ -56,20 +85,30 @@ class NovelDetailScreen extends ConsumerWidget {
                     _StatsRow(novel: novel),
                     const SizedBox(height: 16),
                     // Read button
-                    chaptersAsync.when(
+                    firstChapterAsync.when(
                       loading: () => const SizedBox.shrink(),
-                      error: (_, error) => const SizedBox.shrink(),
-                      data: (chapters) {
-                        if (chapters.isEmpty) return const SizedBox.shrink();
-                        final first = chapters.first;
+                      error: (_, _) => const SizedBox.shrink(),
+                      data: (firstPage) {
+                        final first =
+                            firstPage.chapters.isNotEmpty ? firstPage.chapters.first : null;
+                        if (first == null) return const SizedBox.shrink();
+
+                        final progress = readProgressAsync.valueOrNull;
+                        final continueChapterId = progress?['chapterId'] as String?;
+                        final continueChapterNumber =
+                            (progress?['chapterNumber'] as num?)?.toInt();
+                        final hasProgress = continueChapterId != null && continueChapterId.isNotEmpty;
+                        final targetChapterId = hasProgress ? continueChapterId : first.id;
+                        final buttonLabel = hasProgress
+                            ? 'Đọc tiếp chương ${continueChapterNumber ?? '?'}'
+                            : 'Đọc từ đầu';
+
                         return FilledButton.icon(
                           onPressed: () => context.push(
-                            RouteNames.readerChapter(first.id),
+                            RouteNames.readerChapter(targetChapterId),
                           ),
                           icon: const Icon(Icons.menu_book),
-                          label: Text(
-                            'Đọc Chương ${first.number}: ${first.title}',
-                          ),
+                          label: Text(buttonLabel),
                           style: FilledButton.styleFrom(
                             minimumSize: const Size.fromHeight(48),
                           ),
@@ -83,8 +122,8 @@ class NovelDetailScreen extends ConsumerWidget {
                         Text('Danh sách chương', style: Theme.of(context).textTheme.titleMedium),
                         const Spacer(),
                         chaptersAsync.whenOrNull(
-                          data: (chapters) => Text(
-                            '${chapters.length} chương',
+                          data: (pageData) => Text(
+                            '${pageData.totalChapters} chương • Trang ${pageData.currentPage}/${pageData.totalPages == 0 ? 1 : pageData.totalPages}',
                             style: Theme.of(context).textTheme.bodySmall,
                           ),
                         ) ?? const SizedBox.shrink(),
@@ -102,12 +141,22 @@ class NovelDetailScreen extends ConsumerWidget {
                   child: Center(child: CircularProgressIndicator()),
                 ),
               ),
-              error: (_, error) =>
-                  const SliverToBoxAdapter(child: SizedBox.shrink()),
-              data: (chapters) => SliverList(
+              error: (error, _) => SliverToBoxAdapter(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  child: Text(
+                    'Không tải được danh sách chương: $error',
+                    style: Theme.of(context)
+                        .textTheme
+                        .bodySmall
+                        ?.copyWith(color: Theme.of(context).colorScheme.error),
+                  ),
+                ),
+              ),
+              data: (pageData) => SliverList(
                 delegate: SliverChildBuilderDelegate(
                   (context, index) {
-                    final ch = chapters[index];
+                    final ch = pageData.chapters[index];
                     return ListTile(
                       dense: true,
                       title: Text(
@@ -118,8 +167,41 @@ class NovelDetailScreen extends ConsumerWidget {
                       onTap: () => context.push(RouteNames.readerChapter(ch.id)),
                     );
                   },
-                  childCount: chapters.length,
+                  childCount: pageData.chapters.length,
                 ),
+              ),
+            ),
+            SliverToBoxAdapter(
+              child: chaptersAsync.when(
+                loading: () => const SizedBox.shrink(),
+                error: (_, _) => const SizedBox.shrink(),
+                data: (pageData) {
+                  final totalPages = pageData.totalPages == 0 ? 1 : pageData.totalPages;
+                  return Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+                    child: Row(
+                      children: [
+                        OutlinedButton.icon(
+                          onPressed: _currentPage > 1
+                              ? () => setState(() => _currentPage = _currentPage - 1)
+                              : null,
+                          icon: const Icon(Icons.chevron_left),
+                          label: const Text('Trang trước'),
+                        ),
+                        const Spacer(),
+                        Text('Trang $_currentPage/$totalPages'),
+                        const Spacer(),
+                        OutlinedButton.icon(
+                          onPressed: _currentPage < totalPages
+                              ? () => setState(() => _currentPage = _currentPage + 1)
+                              : null,
+                          icon: const Icon(Icons.chevron_right),
+                          label: const Text('Trang sau'),
+                        ),
+                      ],
+                    ),
+                  );
+                },
               ),
             ),
             const SliverToBoxAdapter(child: SizedBox(height: 24)),

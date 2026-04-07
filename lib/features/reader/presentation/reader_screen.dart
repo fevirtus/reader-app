@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -33,6 +34,10 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
   double _lastScrollOffset = 0;
   double _scrollDeltaSinceToggle = 0;
   int _chapterDirection = 0; // -1: previous, 1: next
+  int _lastAutoScrolledParagraph = -1;
+  int _lastTtsCompletedCount = 0;
+  String? _autoStartQueuedChapterId;
+  final List<GlobalKey> _paragraphKeys = [];
 
   List<String> _paragraphsOf(String content) => content
       .split(RegExp(r'\n+'))
@@ -59,6 +64,112 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
       default:
         return TextAlign.justify;
     }
+  }
+
+  Widget _buildParagraphText({
+    required BuildContext context,
+    required String paragraph,
+    required TextStyle style,
+    required TextAlign textAlign,
+    required bool isActiveParagraph,
+    required int highlightStart,
+    required int highlightEnd,
+  }) {
+    if (!isActiveParagraph || highlightStart < 0 || highlightEnd <= highlightStart) {
+      return SelectableText(
+        paragraph,
+        textAlign: textAlign,
+        style: style,
+      );
+    }
+
+    final safeStart = highlightStart.clamp(0, paragraph.length);
+    final safeEnd = highlightEnd.clamp(0, paragraph.length);
+    if (safeEnd <= safeStart) {
+      return SelectableText(
+        paragraph,
+        textAlign: textAlign,
+        style: style,
+      );
+    }
+
+    final highlightStyle = style.copyWith(
+      backgroundColor: Theme.of(context).colorScheme.primary.withAlpha(80),
+      fontWeight: FontWeight.w600,
+    );
+
+    return RichText(
+      textAlign: textAlign,
+      text: TextSpan(
+        style: style,
+        children: [
+          if (safeStart > 0) TextSpan(text: paragraph.substring(0, safeStart)),
+          TextSpan(text: paragraph.substring(safeStart, safeEnd), style: highlightStyle),
+          if (safeEnd < paragraph.length) TextSpan(text: paragraph.substring(safeEnd)),
+        ],
+      ),
+    );
+  }
+
+  void _ensureParagraphKeys(int count) {
+    if (_paragraphKeys.length == count) return;
+    _paragraphKeys
+      ..clear()
+      ..addAll(List.generate(count, (_) => GlobalKey()));
+    _lastAutoScrolledParagraph = -1;
+  }
+
+  void _maybeAutoScrollToTtsParagraph(TtsState tts, int paragraphCount) {
+    if (tts.status == TtsStatus.idle) return;
+    final index = tts.activeParagraphIndex;
+    if (index < 0 || index >= paragraphCount) return;
+    if (index == _lastAutoScrolledParagraph) return;
+
+    _lastAutoScrolledParagraph = index;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final ctx = _paragraphKeys[index].currentContext;
+      if (ctx == null) return;
+      Scrollable.ensureVisible(
+        ctx,
+        alignment: 0.22,
+        duration: const Duration(milliseconds: 280),
+        curve: Curves.easeOutCubic,
+      );
+    });
+  }
+
+  int _firstVisibleParagraphIndex() {
+    if (!_scrollCtrl.hasClients || _paragraphKeys.isEmpty) return 0;
+
+    final viewportTop = _scrollCtrl.offset + 8;
+    final viewportBottom =
+        _scrollCtrl.offset + _scrollCtrl.position.viewportDimension - 8;
+
+    int? partiallyVisibleIndex;
+
+    for (var i = 0; i < _paragraphKeys.length; i++) {
+      final ctx = _paragraphKeys[i].currentContext;
+      if (ctx == null) continue;
+
+      final renderObject = ctx.findRenderObject();
+      if (renderObject == null || !renderObject.attached) continue;
+
+      final viewport = RenderAbstractViewport.of(renderObject);
+
+      final top = viewport.getOffsetToReveal(renderObject, 0).offset;
+      final bottom = viewport.getOffsetToReveal(renderObject, 1).offset;
+
+      final fullyVisible = top >= viewportTop && bottom <= viewportBottom;
+      if (fullyVisible) return i;
+
+      final partiallyVisible = bottom > viewportTop && top < viewportBottom;
+      if (partiallyVisible && partiallyVisibleIndex == null) {
+        partiallyVisibleIndex = i;
+      }
+    }
+
+    return partiallyVisibleIndex ?? 0;
   }
 
   @override
@@ -191,7 +302,12 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
       builder: (sheetContext) {
         return Consumer(
           builder: (context, ref, _) {
-            final chaptersAsync = ref.watch(chapterListProvider(currentChapter.novelId));
+            final tocPage = ((currentChapter.number - 1) ~/ chapterPageSize) + 1;
+            final chaptersAsync = ref.watch(
+              chapterListProvider(
+                ChapterListQuery(novelId: currentChapter.novelId, page: tocPage),
+              ),
+            );
             return FractionallySizedBox(
               heightFactor: 0.82,
               child: SafeArea(
@@ -220,13 +336,14 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
                       child: chaptersAsync.when(
                         loading: () => const Center(child: CircularProgressIndicator()),
                         error: (e, _) => Center(child: Text('Không tải được mục lục: $e')),
-                        data: (chapters) {
+                        data: (pageData) {
+                          final chapters = pageData.chapters;
                           if (chapters.isEmpty) {
                             return const Center(child: Text('Chưa có danh sách chương.'));
                           }
                           return ListView.separated(
                             itemCount: chapters.length,
-                            separatorBuilder: (_, __) => const Divider(height: 1),
+                            separatorBuilder: (_, _) => const Divider(height: 1),
                             itemBuilder: (context, index) {
                               final item = chapters[index];
                               final isCurrent = item.id == currentChapter.id;
@@ -264,7 +381,11 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
     );
   }
 
-  Future<void> _openReadingSettingsSheet(String previewContent) async {
+  Future<void> _openReadingSettingsSheet(
+    String previewContent,
+    String chapterId,
+    String chapterTitle,
+  ) async {
     await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
@@ -276,6 +397,16 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
             final settings = ref.watch(readingSettingsProvider);
             final tts = ref.watch(ttsProvider);
             final ttsNotifier = ref.read(ttsProvider.notifier);
+
+            void closeSettingsSheet() {
+              if (!sheetContext.mounted) return;
+              final route = ModalRoute.of(sheetContext);
+              if (route != null) {
+                Navigator.of(sheetContext).removeRoute(route);
+                return;
+              }
+              Navigator.of(sheetContext).maybePop();
+            }
 
             Future<void> update(dynamic next) async {
               await ref.read(readingSettingsProvider.notifier).update(next);
@@ -314,7 +445,7 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
                               child: const Text('Mặc định'),
                             ),
                             IconButton(
-                              onPressed: () => Navigator.of(context).pop(),
+                              onPressed: closeSettingsSheet,
                               icon: const Icon(Icons.close),
                             ),
                           ],
@@ -544,7 +675,10 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
                                                       color: Theme.of(context).colorScheme.secondaryContainer,
                                                       borderRadius: BorderRadius.circular(999),
                                                     ),
-                                                    child: Text('${tts.speed}x', style: Theme.of(context).textTheme.labelLarge),
+                                                    child: Text(
+                                                      formatTtsSpeedLabel(tts.speed),
+                                                      style: Theme.of(context).textTheme.labelLarge,
+                                                    ),
                                                   ),
                                                 ],
                                               ),
@@ -552,17 +686,83 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
                                               Wrap(
                                                 spacing: 8,
                                                 runSpacing: 8,
-                                                children: [0.75, 1.0, 1.25, 1.5, 1.75].map((speed) {
+                                                children: [0.35, 0.45, 0.55, 0.65, 0.8, 1.0].map((speed) {
                                                   final selected = tts.speed == speed;
                                                   return ChoiceChip(
-                                                    label: Text('${speed}x'),
+                                                    label: Text(formatTtsSpeedLabel(speed)),
                                                     selected: selected,
                                                     onSelected: (_) => ttsNotifier.setSpeed(speed),
                                                   );
                                                 }).toList(),
                                               ),
                                               const SizedBox(height: 12),
-                                              TtsPlayerWidget(content: previewContent),
+                                              SwitchListTile.adaptive(
+                                                contentPadding: EdgeInsets.zero,
+                                                title: const Text('Chạy nền cho TTS'),
+                                                subtitle: const Text(
+                                                  'Tiếp tục đọc khi chuyển app hoặc tắt màn hình (Android)',
+                                                ),
+                                                value: tts.backgroundModeEnabled,
+                                                onChanged: ttsNotifier.setBackgroundModeEnabled,
+                                              ),
+                                              if (tts.backgroundModeEnabled)
+                                                ListTile(
+                                                  contentPadding: EdgeInsets.zero,
+                                                  title: const Text('Loại trừ tối ưu pin'),
+                                                  subtitle: Text(
+                                                    tts.batteryOptimizationIgnored
+                                                        ? 'Đã bật: Android sẽ ít khả năng dừng TTS khi chạy nền.'
+                                                        : 'Nên bật để Android không chặn TTS khi tắt màn hình.',
+                                                  ),
+                                                  trailing: tts.batteryOptimizationIgnored
+                                                      ? const Icon(Icons.verified, color: Colors.green)
+                                                      : OutlinedButton(
+                                                          onPressed: ttsNotifier
+                                                              .ensureBatteryOptimizationIgnored,
+                                                          child: const Text('Bật ngay'),
+                                                        ),
+                                                ),
+                                              const SizedBox(height: 12),
+                                              if (tts.availableVietnameseVoices.isNotEmpty)
+                                                DropdownButtonFormField<String>(
+                                                  initialValue: tts.voiceName,
+                                                  isExpanded: true,
+                                                  decoration: const InputDecoration(
+                                                    labelText: 'Giọng đọc tiếng Việt',
+                                                    border: OutlineInputBorder(),
+                                                  ),
+                                                  items: tts.availableVietnameseVoices
+                                                      .map(
+                                                        (v) => DropdownMenuItem<String>(
+                                                          value: v.name,
+                                                          child: Text(
+                                                            v.displayName,
+                                                            overflow: TextOverflow.ellipsis,
+                                                          ),
+                                                        ),
+                                                      )
+                                                      .toList(),
+                                                  onChanged: (value) {
+                                                    if (value != null) {
+                                                      ttsNotifier.setVoiceByName(value);
+                                                    }
+                                                  },
+                                                )
+                                              else
+                                                Text(
+                                                  'Thiết bị không cung cấp nhiều giọng tiếng Việt. Đang dùng ${tts.voiceName ?? tts.language}.',
+                                                  style: Theme.of(context).textTheme.bodySmall,
+                                                ),
+                                              const SizedBox(height: 12),
+                                              TtsPlayerWidget(
+                                                content: previewContent,
+                                                contentKey: chapterId,
+                                                title: 'Chương $chapterTitle',
+                                                includeTitleOnStart: false,
+                                                resolveStartParagraphIndex:
+                                                    _firstVisibleParagraphIndex,
+                                                onStarted: closeSettingsSheet,
+                                              ),
                                             ],
                                           ),
                                         ),
@@ -628,8 +828,42 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
         ),
         data: (chapter) {
           final paragraphs = _paragraphsOf(chapter.content);
+          _ensureParagraphKeys(paragraphs.length);
           final textAlign = _textAlignFor(settings.textAlign);
           final novelAsync = ref.watch(novelDetailProvider(chapter.novelId));
+          final tts = ref.watch(ttsProvider);
+          final shouldHighlightTts = tts.contentKey == chapter.id &&
+              (tts.status == TtsStatus.playing || tts.status == TtsStatus.paused);
+
+          if (tts.completedCount > _lastTtsCompletedCount) {
+            _lastTtsCompletedCount = tts.completedCount;
+            if (tts.contentKey == chapter.id && chapter.nextChapterId != null) {
+              final nextChapterId = chapter.nextChapterId!;
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                if (!mounted) return;
+                ref.read(ttsProvider.notifier).scheduleAutoStartForChapter(nextChapterId);
+                context.pushReplacement(RouteNames.readerChapter(nextChapterId));
+              });
+            }
+          }
+
+          if (tts.pendingAutoStartChapterId == chapter.id &&
+              _autoStartQueuedChapterId != chapter.id) {
+            _autoStartQueuedChapterId = chapter.id;
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (!mounted) return;
+              final notifier = ref.read(ttsProvider.notifier);
+              notifier.clearPendingAutoStartChapter();
+              notifier.startReading(
+                    chapter.content,
+                    contentKey: chapter.id,
+                    title: 'Chương ${chapter.number}: ${chapter.title}',
+                  );
+              _autoStartQueuedChapterId = null;
+            });
+          }
+
+          _maybeAutoScrollToTtsParagraph(tts, paragraphs.length);
           WidgetsBinding.instance.addPostFrameCallback((_) {
             _initializeChapterSession(chapter);
           });
@@ -645,7 +879,11 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
                   _TopBar(
                     title: _chapterTopBarTitle(chapter),
                     progress: _readingProgress,
-                    onOpenSettings: () => _openReadingSettingsSheet(chapter.content),
+                    onOpenSettings: () => _openReadingSettingsSheet(
+                      chapter.content,
+                      chapter.id,
+                      'Chương ${chapter.number}: ${chapter.title}',
+                    ),
                     barBackgroundColor: readerBackground,
                     foregroundColor: readerTextColor,
                   ),
@@ -693,7 +931,7 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
                                               color: readerMutedColor,
                                             ),
                                       ),
-                                      error: (_, __) => const SizedBox.shrink(),
+                                      error: (_, _) => const SizedBox.shrink(),
                                       data: (novel) => Text(
                                         novel.title,
                                         maxLines: 1,
@@ -727,13 +965,15 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
                                         children: [
                                           for (var index = 0; index < paragraphs.length; index++)
                                             Padding(
+                                              key: _paragraphKeys[index],
                                               padding: EdgeInsets.only(
                                                 bottom: index == paragraphs.length - 1
                                                     ? 0
                                                     : settings.paragraphSpacing,
                                               ),
-                                              child: SelectableText(
-                                                paragraphs[index],
+                                              child: _buildParagraphText(
+                                                context: context,
+                                                paragraph: paragraphs[index],
                                                 textAlign: textAlign,
                                                 style: TextStyle(
                                                   color: readerTextColor,
@@ -746,6 +986,10 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
                                                           ? 'Courier'
                                                           : null,
                                                 ),
+                                                isActiveParagraph: shouldHighlightTts &&
+                                                  tts.activeParagraphIndex == index,
+                                                highlightStart: tts.progressStart,
+                                                highlightEnd: tts.progressEnd,
                                               ),
                                             ),
                                         ],
@@ -801,6 +1045,27 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
               ),
             )
           : null,
+      bottomNavigationBar: chapterAsync.whenOrNull(
+        data: (chapter) {
+          final tts = ref.watch(ttsProvider);
+          final showMini = tts.contentKey == chapter.id &&
+              (tts.status == TtsStatus.playing || tts.status == TtsStatus.paused);
+          if (!showMini) return const SizedBox.shrink();
+
+          return SafeArea(
+            top: false,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(12, 4, 12, 10),
+              child: TtsPlayerWidget(
+                compact: true,
+                content: chapter.content,
+                contentKey: chapter.id,
+                title: 'Chương ${chapter.number}: ${chapter.title}',
+              ),
+            ),
+          );
+        },
+      ),
     );
   }
 }

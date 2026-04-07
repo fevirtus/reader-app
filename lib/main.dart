@@ -8,22 +8,22 @@ import 'app/app.dart';
 import 'core/logging/app_provider_observer.dart';
 
 void main() {
-  WidgetsFlutterBinding.ensureInitialized();
-
-  FlutterError.onError = (details) {
-    FlutterError.presentError(details);
-    debugPrint('[APP][FLUTTER_ERROR] ${details.exceptionAsString()}');
-    debugPrintStack(stackTrace: details.stack);
-  };
-
-  PlatformDispatcher.instance.onError = (error, stack) {
-    debugPrint('[APP][PLATFORM_ERROR] $error');
-    debugPrintStack(stackTrace: stack);
-    return true;
-  };
-
   runZonedGuarded(
     () {
+      WidgetsFlutterBinding.ensureInitialized();
+
+      FlutterError.onError = (details) {
+        FlutterError.presentError(details);
+        debugPrint('[APP][FLUTTER_ERROR] ${details.exceptionAsString()}');
+        debugPrintStack(stackTrace: details.stack);
+      };
+
+      PlatformDispatcher.instance.onError = (error, stack) {
+        debugPrint('[APP][PLATFORM_ERROR] $error');
+        debugPrintStack(stackTrace: stack);
+        return true;
+      };
+
       runApp(
         const ProviderScope(
           observers: [AppProviderObserver()],

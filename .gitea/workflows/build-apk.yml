@@ -1,0 +1,61 @@
+name: Build Android APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+
+    env:
+      BASE_URL: ${{ secrets.BASE_URL }}
+      GOOGLE_SERVER_CLIENT_ID: ${{ secrets.GOOGLE_SERVER_CLIENT_ID }}
+      GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "3.24.5"
+          channel: stable
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Build release APK
+        run: |
+          BASE_URL_VALUE="${BASE_URL:-http://127.0.0.1:8000}"
+
+          FLUTTER_CMD=(
+            flutter build apk --release
+            --dart-define=BASE_URL=${BASE_URL_VALUE}
+          )
+
+          if [ -n "${GOOGLE_SERVER_CLIENT_ID}" ]; then
+            FLUTTER_CMD+=(--dart-define=GOOGLE_SERVER_CLIENT_ID=${GOOGLE_SERVER_CLIENT_ID})
+          fi
+
+          if [ -n "${GOOGLE_CLIENT_ID}" ]; then
+            FLUTTER_CMD+=(--dart-define=GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID})
+          fi
+
+          "${FLUTTER_CMD[@]}"
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: reader-app-release-apk
+          path: build/app/outputs/flutter-apk/app-release.apk
+          if-no-files-found: error
