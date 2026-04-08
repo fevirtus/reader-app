@@ -2,17 +2,13 @@ name: Build Android APK
 
 on:
   workflow_dispatch:
-  push:
-    tags:
-      - "v*"
-  create:
+    inputs:
+      release_tag:
+        description: "Release tag (example: v1.0.10)"
+        required: true
 
 jobs:
   build-apk:
-    if: |
-      (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) ||
-      (github.event_name == 'create' && github.ref_type == 'tag' && startsWith(github.ref, 'v')) ||
-      github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
 
     env:
@@ -20,6 +16,7 @@ jobs:
       GOOGLE_SERVER_CLIENT_ID: ${{ secrets.GOOGLE_SERVER_CLIENT_ID }}
       GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
       TOKEN: ${{ secrets.TOKEN }}
+      RELEASE_TAG: ${{ github.event.inputs.release_tag }}
       ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
       ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
       ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
@@ -209,6 +206,11 @@ PY
             exit 1
           fi
 
+          if [ -z "${RELEASE_TAG}" ]; then
+            echo "Missing required workflow input: release_tag"
+            exit 1
+          fi
+
           APK_PATH="build/app/outputs/flutter-apk/app-release.apk"
           if [ ! -f "$APK_PATH" ]; then
             echo "APK not found at $APK_PATH"
@@ -218,7 +220,7 @@ PY
           OWNER_REPO="${GITHUB_REPOSITORY}"
           OWNER="${OWNER_REPO%%/*}"
           REPO="${OWNER_REPO##*/}"
-          TAG="${GITHUB_REF_NAME}"
+          TAG="${RELEASE_TAG}"
           API_BASE="${GITHUB_SERVER_URL}/api/v1"
 
           RELEASE_JSON=$(curl -sS -X POST \
