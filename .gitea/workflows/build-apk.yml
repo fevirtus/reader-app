@@ -87,18 +87,18 @@ jobs:
           if [ -n "${ANDROID_KEYSTORE_BASE64}" ] && [ -n "${ANDROID_KEYSTORE_PASSWORD}" ] && [ -n "${ANDROID_KEY_ALIAS}" ] && [ -n "${ANDROID_KEY_PASSWORD}" ]; then
             echo "Preparing release keystore from secrets"
 
-            if ! python3 -c "import base64,os,re,sys; s=os.environ.get('ANDROID_KEYSTORE_BASE64',''); s=s.strip().strip(chr(34)).strip(chr(39)); s=s.replace('\\n',''); s=re.sub(r'^data:[^,]*,','',s); s=re.sub(r'\\s+','',s); s=s + ('=' * (-len(s) % 4)); (print('ANDROID_KEYSTORE_BASE64 is empty after normalization'), sys.exit(1)) if not s else None; d=base64.b64decode(s, validate=False); open('android/release.keystore','wb').write(d); print('Decoded keystore bytes:', len(d))"
+            if ! python3 -c "import base64,os,re,sys; s=os.environ.get('ANDROID_KEYSTORE_BASE64',''); s=s.strip().strip(chr(34)).strip(chr(39)); s=s.replace('\\n',''); s=re.sub(r'^data:[^,]*,','',s); s=re.sub(r'\\s+','',s); s=s + ('=' * (-len(s) % 4)); (print('ANDROID_KEYSTORE_BASE64 is empty after normalization'), sys.exit(1)) if not s else None; d=base64.b64decode(s, validate=False); open('android/app/release.keystore','wb').write(d); print('Decoded keystore bytes:', len(d))"
             then
               echo "Keystore decoding failed"
               exit 1
             fi
 
-            if [ ! -s android/release.keystore ]; then
+            if [ ! -s android/app/release.keystore ]; then
               echo "Decoded keystore file is empty"
               exit 1
             fi
 
-            if ! keytool -list -keystore android/release.keystore -storepass "${ANDROID_KEYSTORE_PASSWORD}" >/dev/null 2>&1; then
+            if ! keytool -list -keystore android/app/release.keystore -storepass "${ANDROID_KEYSTORE_PASSWORD}" >/dev/null 2>&1; then
               echo "Decoded keystore is invalid or ANDROID_KEYSTORE_PASSWORD is incorrect"
               exit 1
             fi
