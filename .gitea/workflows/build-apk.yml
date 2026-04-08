@@ -68,17 +68,60 @@ jobs:
           if [ -n "${ANDROID_KEYSTORE_BASE64}" ] && [ -n "${ANDROID_KEYSTORE_PASSWORD}" ] && [ -n "${ANDROID_KEY_ALIAS}" ] && [ -n "${ANDROID_KEY_PASSWORD}" ]; then
             echo "Preparing release keystore from secrets"
 
-            CLEAN_B64="$(printf '%s' "${ANDROID_KEYSTORE_BASE64}" | tr -d '[:space:]')"
-            if [ -z "${CLEAN_B64}" ]; then
-              echo "ANDROID_KEYSTORE_BASE64 is empty after trimming whitespace"
-              exit 1
-            fi
+            if ! python3 - <<'PY'
+import base64
+import os
+import re
+import sys
 
-            if ! printf '%s' "${CLEAN_B64}" | base64 --decode > android/release.keystore 2>/tmp/keystore_decode_err; then
-              echo "Failed to decode ANDROID_KEYSTORE_BASE64"
-              echo "Tip: store raw base64 one-line output from: base64 < release.jks | tr -d '\\n'"
-              echo "Decode error:"
-              cat /tmp/keystore_decode_err
+s = os.environ.get("ANDROID_KEYSTORE_BASE64", "")
+if not s:
+    print("ANDROID_KEYSTORE_BASE64 is empty")
+    sys.exit(1)
+
+# Normalize common copy/paste formats.
+s = s.strip().strip('"').strip("'")
+s = s.replace("\\n", "")
+s = re.sub(r"^data:[^,]*,", "", s)
+s = re.sub(r"\s+", "", s)
+
+if not s:
+    print("ANDROID_KEYSTORE_BASE64 is empty after normalization")
+    sys.exit(1)
+
+def try_decode(value: str, urlsafe: bool, validate: bool):
+    value = value + ("=" * (-len(value) % 4))
+    if urlsafe:
+        value = value.replace("-", "+").replace("_", "/")
+    return base64.b64decode(value, validate=validate)
+
+decoded = None
+errors = []
+for urlsafe in (False, True):
+    for validate in (True, False):
+        try:
+            decoded = try_decode(s, urlsafe=urlsafe, validate=validate)
+            if decoded:
+                break
+        except Exception as e:
+            errors.append(str(e))
+    if decoded:
+        break
+
+if not decoded:
+    print("Failed to decode ANDROID_KEYSTORE_BASE64")
+    print("Tip: generate with: base64 < release.jks | tr -d '\\n'")
+    if errors:
+        print("Last decode error:", errors[-1])
+    sys.exit(1)
+
+with open("android/release.keystore", "wb") as f:
+    f.write(decoded)
+
+print(f"Decoded keystore bytes: {len(decoded)}")
+PY
+            then
+              echo "Keystore decoding failed"
               exit 1
             fi
 
