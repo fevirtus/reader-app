@@ -2,8 +2,6 @@ name: Build Android APK
 
 on:
   push:
-    branches:
-      - "**"
   workflow_dispatch:
     inputs:
       release_tag:
@@ -19,7 +17,7 @@ jobs:
       GOOGLE_SERVER_CLIENT_ID: ${{ secrets.GOOGLE_SERVER_CLIENT_ID }}
       GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
       TOKEN: ${{ secrets.TOKEN }}
-      RELEASE_TAG: ${{ github.event.inputs.release_tag || '' }}
+      RELEASE_TAG: ""
       ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
       ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
       ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
@@ -68,6 +66,19 @@ jobs:
 
       - name: Install release tooling
         run: sudo apt-get update && sudo apt-get install -y jq
+
+      - name: Resolve release tag input
+        run: |
+          RESOLVED_TAG=""
+
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ] && [ -n "${INPUT_RELEASE_TAG:-}" ]; then
+            RESOLVED_TAG="${INPUT_RELEASE_TAG}"
+          elif [[ "${GITHUB_REF:-}" == refs/tags/* ]]; then
+            RESOLVED_TAG="${GITHUB_REF#refs/tags/}"
+          fi
+
+          echo "RELEASE_TAG=${RESOLVED_TAG}" >> "$GITHUB_ENV"
+          echo "Resolved RELEASE_TAG=${RESOLVED_TAG:-<empty>}"
 
       - name: Prepare Android release signing
         run: |
@@ -203,15 +214,14 @@ PY
           fi
 
       - name: Create or update Gitea release and upload APK
-        if: ${{ env.RELEASE_TAG != '' }}
         run: |
-          if [ -z "${TOKEN}" ]; then
-            echo "Missing required secret: TOKEN"
-            exit 1
+          if [ -z "${RELEASE_TAG}" ]; then
+            echo "No release_tag provided. Build completed without creating a release."
+            exit 0
           fi
 
-          if [ -z "${RELEASE_TAG}" ]; then
-            echo "Missing required workflow input: release_tag"
+          if [ -z "${TOKEN}" ]; then
+            echo "Missing required secret: TOKEN"
             exit 1
           fi
 
@@ -254,7 +264,3 @@ PY
             -H "Authorization: token ${TOKEN}" \
             -F "attachment=@${APK_PATH}" \
             "${API_BASE}/repos/${OWNER}/${REPO}/releases/${RELEASE_ID}/assets?name=reader-app-${TAG}.apk"
-
-      - name: Skip release upload (no release_tag)
-        if: ${{ env.RELEASE_TAG == '' }}
-        run: echo "No release_tag provided. Build completed without creating a release."
