@@ -67,7 +67,31 @@ jobs:
         run: |
           if [ -n "${ANDROID_KEYSTORE_BASE64}" ] && [ -n "${ANDROID_KEYSTORE_PASSWORD}" ] && [ -n "${ANDROID_KEY_ALIAS}" ] && [ -n "${ANDROID_KEY_PASSWORD}" ]; then
             echo "Preparing release keystore from secrets"
-            echo "${ANDROID_KEYSTORE_BASE64}" | base64 -d > android/release.keystore
+
+            CLEAN_B64="$(printf '%s' "${ANDROID_KEYSTORE_BASE64}" | tr -d '[:space:]')"
+            if [ -z "${CLEAN_B64}" ]; then
+              echo "ANDROID_KEYSTORE_BASE64 is empty after trimming whitespace"
+              exit 1
+            fi
+
+            if ! printf '%s' "${CLEAN_B64}" | base64 --decode > android/release.keystore 2>/tmp/keystore_decode_err; then
+              echo "Failed to decode ANDROID_KEYSTORE_BASE64"
+              echo "Tip: store raw base64 one-line output from: base64 < release.jks | tr -d '\\n'"
+              echo "Decode error:"
+              cat /tmp/keystore_decode_err
+              exit 1
+            fi
+
+            if [ ! -s android/release.keystore ]; then
+              echo "Decoded keystore file is empty"
+              exit 1
+            fi
+
+            if ! keytool -list -keystore android/release.keystore -storepass "${ANDROID_KEYSTORE_PASSWORD}" >/dev/null 2>&1; then
+              echo "Decoded keystore is invalid or ANDROID_KEYSTORE_PASSWORD is incorrect"
+              exit 1
+            fi
+
             {
               echo "storeFile=release.keystore"
               echo "storePassword=${ANDROID_KEYSTORE_PASSWORD}"
