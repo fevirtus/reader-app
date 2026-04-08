@@ -153,13 +153,15 @@ jobs:
           echo "$CERT_OUTPUT"
 
           if [ -n "${EXPECTED_ANDROID_SHA1}" ]; then
-            APK_SHA1=$(echo "$CERT_OUTPUT" | sed -n 's/.*certificate SHA-1 digest: //p' | head -n1 | tr '[:lower:]' '[:upper:]')
-            EXPECTED_SHA1_UPPER=$(echo "${EXPECTED_ANDROID_SHA1}" | tr '[:lower:]' '[:upper:]')
+            APK_SHA1=$(echo "$CERT_OUTPUT" | sed -n 's/.*certificate SHA-1 digest: //p' | head -n1)
+            APK_SHA1_NORMALIZED=$(echo "$APK_SHA1" | tr -d '[:space:]:-' | tr '[:lower:]' '[:upper:]')
+            EXPECTED_SHA1_NORMALIZED=$(echo "${EXPECTED_ANDROID_SHA1}" | tr -d '[:space:]:-' | tr '[:lower:]' '[:upper:]')
 
-            if [ "$APK_SHA1" != "$EXPECTED_SHA1_UPPER" ]; then
+            if [ "$APK_SHA1_NORMALIZED" != "$EXPECTED_SHA1_NORMALIZED" ]; then
               echo "APK SHA-1 mismatch"
-              echo "Expected: $EXPECTED_SHA1_UPPER"
-              echo "Actual  : $APK_SHA1"
+              echo "Expected (normalized): $EXPECTED_SHA1_NORMALIZED"
+              echo "Actual   (normalized): $APK_SHA1_NORMALIZED"
+              echo "Tip: update EXPECTED_ANDROID_SHA1 to this signer if this is your intended release key"
               exit 1
             fi
           fi
