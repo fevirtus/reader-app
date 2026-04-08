@@ -46,3 +46,8 @@ app.*.map.json
 
 # Local mobile runtime defines
 .env.mobile
+
+# Android release signing files (local/CI generated)
+android/key.properties
+android/*.jks
+android/*.keystore

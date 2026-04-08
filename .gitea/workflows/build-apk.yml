@@ -14,6 +14,11 @@ jobs:
       GOOGLE_SERVER_CLIENT_ID: ${{ secrets.GOOGLE_SERVER_CLIENT_ID }}
       GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
       TOKEN: ${{ secrets.TOKEN }}
+      ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+      ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+      ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+      ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+      EXPECTED_ANDROID_SHA1: ${{ secrets.EXPECTED_ANDROID_SHA1 }}
 
     steps:
       - name: Checkout
@@ -58,6 +63,23 @@ jobs:
       - name: Install release tooling
         run: sudo apt-get update && sudo apt-get install -y jq
 
+      - name: Prepare Android release signing
+        run: |
+          if [ -n "${ANDROID_KEYSTORE_BASE64}" ] && [ -n "${ANDROID_KEYSTORE_PASSWORD}" ] && [ -n "${ANDROID_KEY_ALIAS}" ] && [ -n "${ANDROID_KEY_PASSWORD}" ]; then
+            echo "Preparing release keystore from secrets"
+            echo "${ANDROID_KEYSTORE_BASE64}" | base64 -d > android/release.keystore
+            {
+              echo "storeFile=release.keystore"
+              echo "storePassword=${ANDROID_KEYSTORE_PASSWORD}"
+              echo "keyAlias=${ANDROID_KEY_ALIAS}"
+              echo "keyPassword=${ANDROID_KEY_PASSWORD}"
+            } > android/key.properties
+          else
+            echo "Release signing secrets are required for tagged release builds."
+            echo "Please configure: ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD"
+            exit 1
+          fi
+
       - name: Build release APK
         run: |
           BASE_URL_VALUE="${BASE_URL:-http://127.0.0.1:8000}"
@@ -76,6 +98,36 @@ jobs:
           fi
 
           "${FLUTTER_CMD[@]}"
+
+      - name: Verify APK signing certificate
+        run: |
+          APK_PATH="build/app/outputs/flutter-apk/app-release.apk"
+          APKSIGNER_PATH="${ANDROID_SDK_ROOT}/build-tools/35.0.0/apksigner"
+
+          if [ ! -f "$APK_PATH" ]; then
+            echo "APK not found at $APK_PATH"
+            exit 1
+          fi
+
+          if [ ! -x "$APKSIGNER_PATH" ]; then
+            echo "apksigner not found at $APKSIGNER_PATH"
+            exit 1
+          fi
+
+          CERT_OUTPUT="$($APKSIGNER_PATH verify --print-certs "$APK_PATH")"
+          echo "$CERT_OUTPUT"
+
+          if [ -n "${EXPECTED_ANDROID_SHA1}" ]; then
+            APK_SHA1=$(echo "$CERT_OUTPUT" | sed -n 's/.*certificate SHA-1 digest: //p' | head -n1 | tr '[:lower:]' '[:upper:]')
+            EXPECTED_SHA1_UPPER=$(echo "${EXPECTED_ANDROID_SHA1}" | tr '[:lower:]' '[:upper:]')
+
+            if [ "$APK_SHA1" != "$EXPECTED_SHA1_UPPER" ]; then
+              echo "APK SHA-1 mismatch"
+              echo "Expected: $EXPECTED_SHA1_UPPER"
+              echo "Actual  : $APK_SHA1"
+              exit 1
+            fi
+          fi
 
       - name: Create or update Gitea release and upload APK
         run: |
