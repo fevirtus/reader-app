@@ -1,11 +1,14 @@
 name: Build Android APK
 
 on:
+  push:
+    branches:
+      - "**"
   workflow_dispatch:
     inputs:
       release_tag:
         description: "Release tag (example: v1.0.10)"
-        required: true
+        required: false
 
 jobs:
   build-apk:
@@ -16,7 +19,7 @@ jobs:
       GOOGLE_SERVER_CLIENT_ID: ${{ secrets.GOOGLE_SERVER_CLIENT_ID }}
       GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
       TOKEN: ${{ secrets.TOKEN }}
-      RELEASE_TAG: ${{ github.event.inputs.release_tag }}
+      RELEASE_TAG: ${{ github.event.inputs.release_tag || '' }}
       ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
       ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
       ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
@@ -200,6 +203,7 @@ PY
           fi
 
       - name: Create or update Gitea release and upload APK
+        if: ${{ env.RELEASE_TAG != '' }}
         run: |
           if [ -z "${TOKEN}" ]; then
             echo "Missing required secret: TOKEN"
@@ -250,3 +254,7 @@ PY
             -H "Authorization: token ${TOKEN}" \
             -F "attachment=@${APK_PATH}" \
             "${API_BASE}/repos/${OWNER}/${REPO}/releases/${RELEASE_ID}/assets?name=reader-app-${TAG}.apk"
+
+      - name: Skip release upload (no release_tag)
+        if: ${{ env.RELEASE_TAG == '' }}
+        run: echo "No release_tag provided. Build completed without creating a release."
