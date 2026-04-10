@@ -30,7 +30,7 @@ class TtsPlayerWidget extends ConsumerWidget {
     final tts = ref.watch(ttsProvider);
     final notifier = ref.read(ttsProvider.notifier);
 
-    const speeds = [0.35, 0.45, 0.55, 0.65, 0.8, 1.0];
+    const speeds = [0.45, 0.675, 0.9, 1.125, 1.35, 1.8];
 
     Future<void> start() async {
       if (tts.status == TtsStatus.paused) {

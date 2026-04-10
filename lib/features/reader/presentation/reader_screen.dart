@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
@@ -74,22 +75,16 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
     required bool isActiveParagraph,
     required int highlightStart,
     required int highlightEnd,
+    required Function(int charOffset) onSentenceTap,
   }) {
-    if (!isActiveParagraph || highlightStart < 0 || highlightEnd <= highlightStart) {
-      return SelectableText(
-        paragraph,
-        textAlign: textAlign,
-        style: style,
-      );
-    }
+    final sentenceMatches = RegExp(r'[^.!?…]+[.!?…]*').allMatches(paragraph).toList();
 
-    final safeStart = highlightStart.clamp(0, paragraph.length);
-    final safeEnd = highlightEnd.clamp(0, paragraph.length);
-    if (safeEnd <= safeStart) {
+    if (sentenceMatches.isEmpty) {
       return SelectableText(
         paragraph,
         textAlign: textAlign,
         style: style,
+        onTap: () => onSentenceTap(0),
       );
     }
 
@@ -98,16 +93,28 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
       fontWeight: FontWeight.w600,
     );
 
-    return RichText(
-      textAlign: textAlign,
-      text: TextSpan(
+    return SelectableText.rich(
+      TextSpan(
         style: style,
-        children: [
-          if (safeStart > 0) TextSpan(text: paragraph.substring(0, safeStart)),
-          TextSpan(text: paragraph.substring(safeStart, safeEnd), style: highlightStyle),
-          if (safeEnd < paragraph.length) TextSpan(text: paragraph.substring(safeEnd)),
-        ],
+        children: sentenceMatches.map((match) {
+          final sentence = match.group(0)!;
+          final start = match.start;
+          final end = match.end;
+
+          final isCurrentSpoken = isActiveParagraph &&
+              highlightStart >= 0 &&
+              highlightEnd > highlightStart &&
+              start >= highlightStart &&
+              end <= highlightEnd;
+
+          return TextSpan(
+            text: sentence,
+            style: isCurrentSpoken ? highlightStyle : null,
+            recognizer: TapGestureRecognizer()..onTap = () => onSentenceTap(start),
+          );
+        }).toList(),
       ),
+      textAlign: textAlign,
     );
   }
 
@@ -179,6 +186,48 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _scrollCtrl.addListener(_onScroll);
     });
+  }
+
+  /// Handle TTS state transitions that require navigation or restarts.
+  /// Called once from [build] via [ref.listen] — safe to run side effects here.
+  void _onTtsStateChanged(TtsState? previous, TtsState next) {
+    // Guard: only act when something meaningful changed.
+    if (previous == null) return;
+
+    final chapterAsync = ref.read(chapterProvider(widget.chapterId));
+    final chapter = chapterAsync.valueOrNull;
+    if (chapter == null) return;
+
+    // Chapter-completion → auto-advance to next chapter.
+    if (next.completedCount > _lastTtsCompletedCount) {
+      _lastTtsCompletedCount = next.completedCount;
+      if (next.contentKey == chapter.id && chapter.nextChapterId != null) {
+        final nextChapterId = chapter.nextChapterId!;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted) return;
+          ref.read(ttsProvider.notifier).scheduleAutoStartForChapter(nextChapterId);
+          context.pushReplacement(RouteNames.readerChapter(nextChapterId));
+        });
+      }
+      return;
+    }
+
+    // Pending auto-start for this chapter (set by previous chapter's completion).
+    if (next.pendingAutoStartChapterId == chapter.id &&
+        _autoStartQueuedChapterId != chapter.id) {
+      _autoStartQueuedChapterId = chapter.id;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        final notifier = ref.read(ttsProvider.notifier);
+        notifier.clearPendingAutoStartChapter();
+        notifier.startReading(
+          chapter.content,
+          contentKey: chapter.id,
+          title: 'Chương ${chapter.number}: ${chapter.title}',
+        );
+        _autoStartQueuedChapterId = null;
+      });
+    }
   }
 
   @override
@@ -686,7 +735,7 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
                                               Wrap(
                                                 spacing: 8,
                                                 runSpacing: 8,
-                                                children: [0.35, 0.45, 0.55, 0.65, 0.8, 1.0].map((speed) {
+                                                children: [0.45, 0.675, 0.9, 1.125, 1.35, 1.8].map((speed) {
                                                   final selected = tts.speed == speed;
                                                   return ChoiceChip(
                                                     label: Text(formatTtsSpeedLabel(speed)),
@@ -790,6 +839,9 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
   Widget build(BuildContext context) {
     final chapterAsync = ref.watch(chapterProvider(widget.chapterId));
     final settings = ref.watch(readingSettingsProvider);
+
+    // Side-effects for TTS state changes (navigation, auto-start).
+    ref.listen<TtsState>(ttsProvider, _onTtsStateChanged);
     Color readerBackground;
     Color readerTextColor;
     Color readerMutedColor;
@@ -835,33 +887,6 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
           final shouldHighlightTts = tts.contentKey == chapter.id &&
               (tts.status == TtsStatus.playing || tts.status == TtsStatus.paused);
 
-          if (tts.completedCount > _lastTtsCompletedCount) {
-            _lastTtsCompletedCount = tts.completedCount;
-            if (tts.contentKey == chapter.id && chapter.nextChapterId != null) {
-              final nextChapterId = chapter.nextChapterId!;
-              WidgetsBinding.instance.addPostFrameCallback((_) {
-                if (!mounted) return;
-                ref.read(ttsProvider.notifier).scheduleAutoStartForChapter(nextChapterId);
-                context.pushReplacement(RouteNames.readerChapter(nextChapterId));
-              });
-            }
-          }
-
-          if (tts.pendingAutoStartChapterId == chapter.id &&
-              _autoStartQueuedChapterId != chapter.id) {
-            _autoStartQueuedChapterId = chapter.id;
-            WidgetsBinding.instance.addPostFrameCallback((_) {
-              if (!mounted) return;
-              final notifier = ref.read(ttsProvider.notifier);
-              notifier.clearPendingAutoStartChapter();
-              notifier.startReading(
-                    chapter.content,
-                    contentKey: chapter.id,
-                    title: 'Chương ${chapter.number}: ${chapter.title}',
-                  );
-              _autoStartQueuedChapterId = null;
-            });
-          }
 
           _maybeAutoScrollToTtsParagraph(tts, paragraphs.length);
           WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -990,6 +1015,15 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
                                                   tts.activeParagraphIndex == index,
                                                 highlightStart: tts.progressStart,
                                                 highlightEnd: tts.progressEnd,
+                                                onSentenceTap: (charOffset) {
+                                                  ref.read(ttsProvider.notifier).startReading(
+                                                    chapter.content,
+                                                    contentKey: chapter.id,
+                                                    title: 'Chương ${chapter.number}: ${chapter.title}',
+                                                    startParagraphIndex: index,
+                                                    startCharOffset: charOffset,
+                                                  );
+                                                },
                                               ),
                                             ),
                                         ],

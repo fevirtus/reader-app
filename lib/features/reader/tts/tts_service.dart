@@ -7,7 +7,7 @@ import 'package:flutter_tts/flutter_tts.dart';
 
 enum TtsStatus { idle, playing, paused }
 
-const double kTtsBaseSpeechRate = 0.45;
+const double kTtsBaseSpeechRate = 0.9;
 
 double ttsDisplayMultiplier(double speechRate) => speechRate / kTtsBaseSpeechRate;
 
@@ -32,6 +32,13 @@ class _TtsSegment {
   final int paragraphIndex;
   final int start;
   final int end;
+
+  Map<String, Object?> toMap() => {
+    'text': text,
+    'paragraphIndex': paragraphIndex,
+    'start': start,
+    'end': end,
+  };
 }
 
 class TtsVoice {
@@ -65,7 +72,7 @@ class TtsState {
     this.paragraphIndex = 0,
     this.totalParagraphs = 0,
     this.activeParagraphIndex = -1,
-    this.speed = 0.45,
+    this.speed = 0.9,
     this.language = 'vi-VN',
     this.voiceName,
     this.availableVietnameseVoices = const [],
@@ -116,25 +123,48 @@ class TtsState {
         batteryOptimizationIgnored:
             batteryOptimizationIgnored ?? this.batteryOptimizationIgnored,
         pendingAutoStartChapterId: clearPendingAutoStartChapterId
-          ? null
-          : (pendingAutoStartChapterId ?? this.pendingAutoStartChapterId),
+            ? null
+            : (pendingAutoStartChapterId ?? this.pendingAutoStartChapterId),
       );
 
   bool get isPlaying => status == TtsStatus.playing;
 }
 
 class TtsNotifier extends StateNotifier<TtsState> {
-  final FlutterTts _tts = FlutterTts();
-  static const MethodChannel _backgroundChannel = MethodChannel('reader_app/tts_background');
-  List<_TtsSegment> _segments = [];
-  bool _initialized = false;
-  Future<void>? _initFuture;
-
   TtsNotifier() : super(const TtsState()) {
     _initFuture = _init();
   }
 
+  static const MethodChannel _backgroundChannel = MethodChannel(
+    'reader_app/tts_background',
+  );
+  static const MethodChannel _mediaChannel = MethodChannel(
+    'reader_app/tts_media',
+  );
+  static const EventChannel _mediaEventsChannel = EventChannel(
+    'reader_app/tts_media_events',
+  );
+
+  final FlutterTts _tts = FlutterTts();
+  List<_TtsSegment> _segments = [];
+  bool _initialized = false;
+  Future<void>? _initFuture;
+  StreamSubscription<dynamic>? _mediaEventsSub;
+  int _playbackGeneration = 0;
+  bool _isInterruptingPlayback = false;
+  int _pendingFallbackIndex = -1;
+  bool _didStartCurrentFallbackUtterance = false;
+  bool _hasPromptedNotificationSettings = false;
+
+  bool get _useNativeAndroidMediaService => Platform.isAndroid;
+
   Future<void> _init() async {
+    if (_useNativeAndroidMediaService) {
+      await _initAndroidBridge();
+      _initialized = true;
+      return;
+    }
+
     await _tts.awaitSpeakCompletion(true);
     await _tts.setSharedInstance(true);
 
@@ -150,39 +180,85 @@ class TtsNotifier extends StateNotifier<TtsState> {
       );
     }
 
-    if (Platform.isAndroid) {
-      await _tts.setAudioAttributesForNavigation();
-    }
-
-    await _configureVietnameseVoice();
+    await _configureVietnameseVoiceWithFlutterTts();
     await _tts.setSpeechRate(kTtsBaseSpeechRate);
     await _tts.setVolume(1.0);
     await _tts.setPitch(1.0);
 
     _tts.setStartHandler(() {
-      state = state.copyWith(
-        status: TtsStatus.playing,
-      );
+      _didStartCurrentFallbackUtterance = true;
+      final index = _pendingFallbackIndex;
+      if (index >= 0 && index < _segments.length) {
+        final segment = _segments[index];
+        state = state.copyWith(
+          status: TtsStatus.playing,
+          paragraphIndex: index,
+          activeParagraphIndex: segment.paragraphIndex,
+          progressStart: segment.start,
+          progressEnd: segment.end,
+        );
+      } else {
+        state = state.copyWith(status: TtsStatus.playing);
+      }
       unawaited(_syncBackgroundMode());
     });
 
     _tts.setCompletionHandler(() {
-      if (state.status == TtsStatus.playing) {
-        _next();
-      }
+      // Fallback playback progression is driven by _playFallbackFromGeneration.
     });
 
     _tts.setErrorHandler((msg) {
-      state = state.copyWith(status: TtsStatus.idle);
+      if (_isInterruptingPlayback) return;
+      _pendingFallbackIndex = -1;
+      _didStartCurrentFallbackUtterance = false;
+      state = state.copyWith(
+        status: TtsStatus.idle,
+        activeParagraphIndex: -1,
+        progressStart: -1,
+        progressEnd: -1,
+      );
       unawaited(_syncBackgroundMode());
     });
 
     await _syncBackgroundMode();
-
     _initialized = true;
   }
 
-  Future<void> _configureVietnameseVoice() async {
+  Future<void> _initAndroidBridge() async {
+    _mediaEventsSub ??= _mediaEventsChannel.receiveBroadcastStream().listen(
+      _handleAndroidMediaEvent,
+      onError: (_) {
+        state = state.copyWith(
+          status: TtsStatus.idle,
+          activeParagraphIndex: -1,
+          progressStart: -1,
+          progressEnd: -1,
+        );
+      },
+    );
+
+    await _mediaChannel.invokeMethod<void>('initialize', {
+      'backgroundModeEnabled': state.backgroundModeEnabled,
+    });
+
+    final snapshot = await _mediaChannel.invokeMethod<dynamic>('getSnapshot');
+    _applyAndroidSnapshot(snapshot);
+
+    await _ensureAndroidMediaNotificationsEnabled();
+  }
+
+  Future<void> _ensureAndroidMediaNotificationsEnabled() async {
+    if (!_useNativeAndroidMediaService) return;
+    if (_hasPromptedNotificationSettings) return;
+
+    final enabled = await _mediaChannel.invokeMethod<bool>('areNotificationsEnabled') ?? true;
+    if (enabled) return;
+
+    _hasPromptedNotificationSettings = true;
+    await _mediaChannel.invokeMethod<void>('openNotificationSettings');
+  }
+
+  Future<void> _configureVietnameseVoiceWithFlutterTts() async {
     final dynamic voicesRaw = await _tts.getVoices;
 
     String? selectedName;
@@ -191,22 +267,34 @@ class TtsNotifier extends StateNotifier<TtsState> {
 
     if (voicesRaw is List) {
       final vietnamese = voicesRaw.whereType<Map>().where((voice) {
-        final locale = (voice['locale'] ?? voice['language'] ?? '').toString().toLowerCase();
+        final locale = (voice['locale'] ?? voice['language'] ?? '')
+            .toString()
+            .toLowerCase();
         return locale.startsWith('vi');
       }).toList();
 
       for (final voice in vietnamese) {
         final name = voice['name']?.toString();
         final locale = (voice['locale'] ?? voice['language'])?.toString();
-        if (name == null || name.isEmpty || locale == null || locale.isEmpty) continue;
+        if (name == null || name.isEmpty || locale == null || locale.isEmpty) {
+          continue;
+        }
         vietnameseVoices.add(TtsVoice(name: name, locale: locale));
       }
 
       if (vietnamese.isNotEmpty) {
         final preferred = vietnamese.firstWhere(
           (voice) =>
-              (voice['name']?.toString().toLowerCase().contains('female') ?? false) ||
-              (voice['name']?.toString().toLowerCase().contains('natural') ?? false),
+              (voice['name']
+                      ?.toString()
+                      .toLowerCase()
+                      .contains('female') ??
+                  false) ||
+              (voice['name']
+                      ?.toString()
+                      .toLowerCase()
+                      .contains('natural') ??
+                  false),
           orElse: () => vietnamese.first,
         );
         selectedName = preferred['name']?.toString();
@@ -219,6 +307,7 @@ class TtsNotifier extends StateNotifier<TtsState> {
     if (selectedName != null) {
       await _tts.setVoice({'name': selectedName, 'locale': selectedLanguage});
     }
+
     state = state.copyWith(
       language: selectedLanguage,
       voiceName: selectedName,
@@ -226,7 +315,159 @@ class TtsNotifier extends StateNotifier<TtsState> {
     );
   }
 
+  void _handleAndroidMediaEvent(dynamic event) {
+    _applyAndroidSnapshot(event);
+  }
+
+  void _applyAndroidSnapshot(dynamic snapshot) {
+    if (snapshot is! Map) return;
+
+    final data = Map<String, dynamic>.from(
+      snapshot.map((key, value) => MapEntry(key.toString(), value)),
+    );
+
+    final statusRaw = data['status']?.toString() ?? 'idle';
+    final status = switch (statusRaw) {
+      'playing' => TtsStatus.playing,
+      'paused' => TtsStatus.paused,
+      _ => TtsStatus.idle,
+    };
+
+    final voicesRaw = data['availableVietnameseVoices'];
+    final voices = <TtsVoice>[];
+    if (voicesRaw is List) {
+      for (final item in voicesRaw) {
+        if (item is! Map) continue;
+        final map = Map<String, dynamic>.from(
+          item.map((key, value) => MapEntry(key.toString(), value)),
+        );
+        final name = map['name']?.toString();
+        final locale = map['locale']?.toString();
+        if (name == null || name.isEmpty || locale == null || locale.isEmpty) {
+          continue;
+        }
+        voices.add(TtsVoice(name: name, locale: locale));
+      }
+    }
+
+    state = state.copyWith(
+      status: status,
+      paragraphIndex: (data['paragraphIndex'] as num?)?.toInt() ?? 0,
+      totalParagraphs: (data['totalParagraphs'] as num?)?.toInt() ?? 0,
+      activeParagraphIndex: (data['activeParagraphIndex'] as num?)?.toInt() ?? -1,
+      progressStart: (data['progressStart'] as num?)?.toInt() ?? -1,
+      progressEnd: (data['progressEnd'] as num?)?.toInt() ?? -1,
+      contentKey: data['contentKey']?.toString(),
+      completedCount: (data['completedCount'] as num?)?.toInt() ?? state.completedCount,
+      language: data['language']?.toString() ?? state.language,
+      voiceName: data['voiceName']?.toString(),
+      availableVietnameseVoices: voices,
+      backgroundModeEnabled:
+          data['backgroundModeEnabled'] as bool? ?? state.backgroundModeEnabled,
+    );
+  }
+
+  List<_TtsSegment> _buildSegments(
+    String content, {
+    String? title,
+    bool includeTitle = true,
+  }) {
+    final segments = <_TtsSegment>[];
+
+    final titleText = title?.trim();
+    if (includeTitle && titleText != null && titleText.isNotEmpty) {
+      segments.add(
+        _TtsSegment(
+        text: titleText,
+        paragraphIndex: -1,
+        start: -1,
+        end: -1,
+        ),
+      );
+    }
+
+    final paragraphs = content
+        .split(RegExp(r'\n+'))
+        .map((p) => p.trim())
+        .where((p) => p.isNotEmpty)
+        .toList();
+
+    for (var pIndex = 0; pIndex < paragraphs.length; pIndex++) {
+      final paragraph = paragraphs[pIndex];
+      final sentenceMatches = RegExp(r'[^.!?…]+[.!?…]*').allMatches(paragraph);
+      var cursor = 0;
+
+      for (final match in sentenceMatches) {
+        final sentence = match.group(0)?.trim() ?? '';
+        if (sentence.isEmpty) continue;
+
+        var start = paragraph.indexOf(sentence, cursor);
+        if (start < 0) {
+          start = cursor.clamp(0, paragraph.length);
+        }
+
+        final end = (start + sentence.length).clamp(0, paragraph.length);
+        cursor = end;
+
+        segments.add(
+          _TtsSegment(
+            text: sentence,
+            paragraphIndex: pIndex,
+            start: start,
+            end: end,
+          ),
+        );
+      }
+    }
+
+    return segments;
+  }
+
+  int _resolveStartIndex(
+    int paragraphIndex, {
+    int? startParagraphIndex,
+    int? startCharOffset,
+  }) {
+    var validIndex = paragraphIndex.clamp(0, _segments.length - 1);
+
+    if (startParagraphIndex != null) {
+      final matchIndex = _segments.indexWhere(
+        (segment) =>
+            segment.paragraphIndex == startParagraphIndex &&
+            (startCharOffset == null || segment.start >= startCharOffset),
+      );
+
+      if (matchIndex >= 0) {
+        validIndex = matchIndex;
+      } else {
+        final fallbackIndex = _segments.indexWhere(
+          (segment) => segment.paragraphIndex >= startParagraphIndex,
+        );
+        if (fallbackIndex >= 0) {
+          validIndex = fallbackIndex;
+        }
+      }
+    }
+
+    return validIndex;
+  }
+
   Future<void> setVoiceByName(String voiceName) async {
+    if (_useNativeAndroidMediaService) {
+      final selected = state.availableVietnameseVoices.where(
+        (voice) => voice.name == voiceName,
+      );
+      if (selected.isEmpty) return;
+
+      final voice = selected.first;
+      await _mediaChannel.invokeMethod<void>('setVoiceByName', {
+        'voiceName': voice.name,
+        'language': voice.locale,
+      });
+      state = state.copyWith(language: voice.locale, voiceName: voice.name);
+      return;
+    }
+
     final selected = state.availableVietnameseVoices.where((v) => v.name == voiceName);
     if (selected.isEmpty) return;
 
@@ -240,6 +481,16 @@ class TtsNotifier extends StateNotifier<TtsState> {
 
   Future<void> setBackgroundModeEnabled(bool enabled) async {
     state = state.copyWith(backgroundModeEnabled: enabled);
+    if (_useNativeAndroidMediaService) {
+      await _mediaChannel.invokeMethod<void>('setBackgroundModeEnabled', {
+        'enabled': enabled,
+      });
+      if (enabled) {
+        await ensureBatteryOptimizationIgnored();
+      }
+      return;
+    }
+
     await _syncBackgroundMode();
     if (enabled) {
       await ensureBatteryOptimizationIgnored();
@@ -278,23 +529,24 @@ class TtsNotifier extends StateNotifier<TtsState> {
   }
 
   Future<void> _syncBackgroundMode() async {
-    if (!Platform.isAndroid) return;
+    if (_useNativeAndroidMediaService || !Platform.isAndroid) return;
 
     final shouldKeepAlive =
         state.backgroundModeEnabled && state.status == TtsStatus.playing;
     try {
-      await _backgroundChannel
-          .invokeMethod<void>('setWakeLock', {'enabled': shouldKeepAlive});
+      await _backgroundChannel.invokeMethod<void>('setWakeLock', {
+        'enabled': shouldKeepAlive,
+      });
     } catch (_) {
       // Keep playback functional even if native wake lock bridge is unavailable.
     }
   }
 
-  /// Start reading from [content] starting at optional [paragraphIndex].
   Future<void> startReading(
     String content, {
     int paragraphIndex = 0,
     int? startParagraphIndex,
+    int? startCharOffset,
     String? contentKey,
     String? title,
     bool includeTitle = true,
@@ -303,133 +555,228 @@ class TtsNotifier extends StateNotifier<TtsState> {
       await (_initFuture ?? _init());
     }
 
-    final segments = <_TtsSegment>[];
+    _segments = _buildSegments(
+      content,
+      title: title,
+      includeTitle: includeTitle,
+    );
 
-    final titleText = title?.trim();
-    if (includeTitle && titleText != null && titleText.isNotEmpty) {
-      segments.add(_TtsSegment(text: titleText, paragraphIndex: -1, start: -1, end: -1));
-    }
-
-    final paragraphs = content
-        .split(RegExp(r'\n+'))
-        .map((p) => p.trim())
-        .where((p) => p.isNotEmpty)
-        .toList();
-
-    for (var pIndex = 0; pIndex < paragraphs.length; pIndex++) {
-      final paragraph = paragraphs[pIndex];
-      final sentenceMatches = RegExp(r'[^.!?…]+[.!?…]*').allMatches(paragraph);
-      var cursor = 0;
-
-      for (final match in sentenceMatches) {
-        final sentence = match.group(0)?.trim() ?? '';
-        if (sentence.isEmpty) continue;
-        var start = paragraph.indexOf(sentence, cursor);
-        if (start < 0) start = cursor.clamp(0, paragraph.length);
-        final end = (start + sentence.length).clamp(0, paragraph.length);
-        cursor = end;
-
-        segments.add(
-          _TtsSegment(
-            text: sentence,
-            paragraphIndex: pIndex,
-            start: start,
-            end: end,
-          ),
-        );
-      }
-    }
-
-    _segments = segments;
-    if (_segments.isEmpty) return;
-
-    var validIndex = paragraphIndex.clamp(0, _segments.length - 1);
-    if (startParagraphIndex != null) {
-      final startFromVisible = _segments.indexWhere(
-        (segment) => segment.paragraphIndex >= startParagraphIndex,
+    if (_segments.isEmpty) {
+      state = state.copyWith(
+        status: TtsStatus.idle,
+        paragraphIndex: 0,
+        totalParagraphs: 0,
+        activeParagraphIndex: -1,
+        progressStart: -1,
+        progressEnd: -1,
+        contentKey: contentKey,
       );
-      if (startFromVisible >= 0) {
-        validIndex = startFromVisible;
+      if (!_useNativeAndroidMediaService) {
+        await _syncBackgroundMode();
       }
+      return;
     }
 
+    final validIndex = _resolveStartIndex(
+      paragraphIndex,
+      startParagraphIndex: startParagraphIndex,
+      startCharOffset: startCharOffset,
+    );
     final selectedSegment = _segments[validIndex];
+
+    if (_useNativeAndroidMediaService) {
+      await _ensureAndroidMediaNotificationsEnabled();
+
+      state = state.copyWith(
+        status: TtsStatus.playing,
+        paragraphIndex: validIndex,
+        totalParagraphs: _segments.length,
+        activeParagraphIndex: selectedSegment.paragraphIndex,
+        progressStart: selectedSegment.start,
+        progressEnd: selectedSegment.end,
+        contentKey: contentKey,
+      );
+
+      await _mediaChannel.invokeMethod<void>('startReading', {
+        'contentKey': contentKey,
+        'title': title,
+        'startIndex': validIndex,
+        'speed': state.speed,
+        'language': state.language,
+        'voiceName': state.voiceName,
+        'backgroundModeEnabled': state.backgroundModeEnabled,
+        'segments': _segments.map((segment) => segment.toMap()).toList(),
+      });
+      return;
+    }
+
+    final sessionId = await _interruptFallbackPlayback();
+
     state = state.copyWith(
       status: TtsStatus.playing,
       paragraphIndex: validIndex,
       totalParagraphs: _segments.length,
-      activeParagraphIndex: selectedSegment.paragraphIndex,
-      progressStart: selectedSegment.start,
-      progressEnd: selectedSegment.end,
+      activeParagraphIndex: -1,
+      progressStart: -1,
+      progressEnd: -1,
       contentKey: contentKey,
     );
     await _syncBackgroundMode();
-    await _speak(validIndex);
+
+    unawaited(_playFallbackFromGeneration(validIndex, sessionId));
   }
 
-  Future<void> _speak(int index) async {
-    if (index >= _segments.length) {
-      state = state.copyWith(
-        status: TtsStatus.idle,
-        activeParagraphIndex: -1,
-        progressStart: -1,
-        progressEnd: -1,
-      );
-      await _syncBackgroundMode();
-      return;
+  Future<int> _interruptFallbackPlayback() async {
+    _playbackGeneration++;
+    _pendingFallbackIndex = -1;
+    _didStartCurrentFallbackUtterance = false;
+    _isInterruptingPlayback = true;
+
+    try {
+      await _tts.stop();
+      if (Platform.isAndroid) {
+        await Future<void>.delayed(const Duration(milliseconds: 120));
+      }
+    } finally {
+      _isInterruptingPlayback = false;
     }
 
-    final segment = _segments[index];
-    state = state.copyWith(
-      paragraphIndex: index,
-      activeParagraphIndex: segment.paragraphIndex,
-      progressStart: segment.start,
-      progressEnd: segment.end,
-    );
-
-    await _tts.setSpeechRate(state.speed);
-    await _tts.speak(segment.text);
+    return _playbackGeneration;
   }
 
-  Future<void> _next() async {
-    final next = state.paragraphIndex + 1;
-    if (next >= state.totalParagraphs) {
+  Future<void> _playFallbackFromGeneration(int startIndex, int generation) async {
+    if (startIndex < 0 || startIndex >= _segments.length) {
       state = state.copyWith(
         status: TtsStatus.idle,
         paragraphIndex: 0,
         activeParagraphIndex: -1,
         progressStart: -1,
         progressEnd: -1,
-        completedCount: state.completedCount + 1,
       );
       await _syncBackgroundMode();
       return;
     }
+
+    for (var index = startIndex; index < _segments.length; index++) {
+      if (generation != _playbackGeneration) return;
+      if (state.status != TtsStatus.playing) return;
+
+      _pendingFallbackIndex = index;
+      _didStartCurrentFallbackUtterance = false;
+
+      state = state.copyWith(
+        status: TtsStatus.playing,
+        paragraphIndex: index,
+        totalParagraphs: _segments.length,
+        activeParagraphIndex: -1,
+        progressStart: -1,
+        progressEnd: -1,
+      );
+      await _syncBackgroundMode();
+
+      await _tts.setSpeechRate(state.speed);
+      final result = await _tts.speak(_segments[index].text);
+
+      if (generation != _playbackGeneration) return;
+      if (state.status != TtsStatus.playing) return;
+
+      if (result is int && result != 1) {
+        state = state.copyWith(
+          status: TtsStatus.idle,
+          activeParagraphIndex: -1,
+          progressStart: -1,
+          progressEnd: -1,
+        );
+        await _syncBackgroundMode();
+        return;
+      }
+
+      if (!_didStartCurrentFallbackUtterance) {
+        state = state.copyWith(
+          status: TtsStatus.idle,
+          activeParagraphIndex: -1,
+          progressStart: -1,
+          progressEnd: -1,
+        );
+        await _syncBackgroundMode();
+        return;
+      }
+    }
+
+    if (generation != _playbackGeneration) return;
+
+    _pendingFallbackIndex = -1;
+    _didStartCurrentFallbackUtterance = false;
+
     state = state.copyWith(
-      paragraphIndex: next,
-      activeParagraphIndex: _segments[next].paragraphIndex,
-      progressStart: _segments[next].start,
-      progressEnd: _segments[next].end,
+      status: TtsStatus.idle,
+      paragraphIndex: 0,
+      activeParagraphIndex: -1,
+      progressStart: -1,
+      progressEnd: -1,
+      completedCount: state.completedCount + 1,
     );
-    await _speak(next);
+    await _syncBackgroundMode();
   }
 
   Future<void> pause() async {
+    if (_useNativeAndroidMediaService) {
+      await _mediaChannel.invokeMethod<void>('pause');
+      return;
+    }
+
+    if (state.status != TtsStatus.playing) return;
+
+    _playbackGeneration++;
     await _tts.pause();
     state = state.copyWith(status: TtsStatus.paused);
     await _syncBackgroundMode();
   }
 
-  Future<void> resume() async {
-    if (state.status != TtsStatus.paused) return;
-    state = state.copyWith(status: TtsStatus.playing);
+  Future<void> _restartFallbackFromIndex(int index) async {
+    if (_segments.isEmpty) return;
+
+    final sessionId = await _interruptFallbackPlayback();
+    final validIndex = index.clamp(0, _segments.length - 1);
+
+    state = state.copyWith(
+      status: TtsStatus.playing,
+      paragraphIndex: validIndex,
+      totalParagraphs: _segments.length,
+      activeParagraphIndex: -1,
+      progressStart: -1,
+      progressEnd: -1,
+    );
     await _syncBackgroundMode();
-    // Use paragraph-level resume for consistent behavior across engines.
-    await _speak(state.paragraphIndex);
+
+    unawaited(_playFallbackFromGeneration(validIndex, sessionId));
+  }
+
+  Future<void> resume() async {
+    if (_useNativeAndroidMediaService) {
+      await _mediaChannel.invokeMethod<void>('resume');
+      return;
+    }
+
+    if (state.status != TtsStatus.paused) return;
+    await _restartFallbackFromIndex(state.paragraphIndex);
   }
 
   Future<void> stop() async {
-    await _tts.stop();
+    if (_useNativeAndroidMediaService) {
+      await _mediaChannel.invokeMethod<void>('stop');
+      state = state.copyWith(
+        status: TtsStatus.idle,
+        paragraphIndex: 0,
+        activeParagraphIndex: -1,
+        progressStart: -1,
+        progressEnd: -1,
+        clearContentKey: true,
+      );
+      return;
+    }
+
+    await _interruptFallbackPlayback();
     state = state.copyWith(
       status: TtsStatus.idle,
       paragraphIndex: 0,
@@ -442,32 +789,53 @@ class TtsNotifier extends StateNotifier<TtsState> {
   }
 
   Future<void> skipForward() async {
-    await _tts.stop();
-    await _next();
+    if (_useNativeAndroidMediaService) {
+      await _mediaChannel.invokeMethod<void>('skipForward');
+      return;
+    }
+
+    if (_segments.isEmpty || state.totalParagraphs <= 0) return;
+
+    final next = state.paragraphIndex + 1;
+    if (next >= _segments.length) {
+      await stop();
+      return;
+    }
+
+    await _restartFallbackFromIndex(next);
   }
 
   Future<void> skipBack() async {
-    await _tts.stop();
-    if (state.totalParagraphs <= 0) return;
-    final prev = (state.paragraphIndex - 1).clamp(0, state.totalParagraphs - 1);
-    state = state.copyWith(
-      paragraphIndex: prev,
-      activeParagraphIndex: _segments[prev].paragraphIndex,
-      progressStart: _segments[prev].start,
-      progressEnd: _segments[prev].end,
-    );
-    if (state.status == TtsStatus.playing) await _speak(prev);
+    if (_useNativeAndroidMediaService) {
+      await _mediaChannel.invokeMethod<void>('skipBack');
+      return;
+    }
+
+    if (_segments.isEmpty || state.totalParagraphs <= 0) return;
+
+    final prev = (state.paragraphIndex - 1).clamp(0, _segments.length - 1);
+    await _restartFallbackFromIndex(prev);
   }
 
   Future<void> setSpeed(double speed) async {
     state = state.copyWith(speed: speed);
+
+    if (_useNativeAndroidMediaService) {
+      await _mediaChannel.invokeMethod<void>('setSpeed', {'speed': speed});
+      return;
+    }
+
     await _tts.setSpeechRate(speed);
   }
 
   @override
   void dispose() {
-    unawaited(_backgroundChannel.invokeMethod<void>('setWakeLock', {'enabled': false}));
-    _tts.stop();
+    _mediaEventsSub?.cancel();
+    if (_useNativeAndroidMediaService) {
+      unawaited(_mediaChannel.invokeMethod<void>('dispose'));
+    } else {
+      unawaited(_tts.stop());
+    }
     super.dispose();
   }
 }
