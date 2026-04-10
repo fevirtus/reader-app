@@ -84,7 +84,7 @@ jobs:
 
       - name: Prepare Android release signing
         run: |
-          if [ -n "${ANDROID_KEYSTORE_BASE64}" ] && [ -n "${ANDROID_KEYSTORE_PASSWORD}" ] && [ -n "${ANDROID_KEY_ALIAS}" ] && [ -n "${ANDROID_KEY_PASSWORD}" ]; then
+          if [ -n "${ANDROID_KEYSTORE_BASE64}" ] && [ -n "${ANDROID_KEYSTORE_PASSWORD}" ] && [ -n "${ANDROID_KEY_PASSWORD}" ]; then
             echo "Preparing release keystore from secrets"
 
             if ! python3 -c "import base64,os,re,sys; s=os.environ.get('ANDROID_KEYSTORE_BASE64',''); s=s.strip().strip(chr(34)).strip(chr(39)); s=s.replace('\\n',''); s=re.sub(r'^data:[^,]*,','',s); s=re.sub(r'\\s+','',s); s=s + ('=' * (-len(s) % 4)); (print('ANDROID_KEYSTORE_BASE64 is empty after normalization'), sys.exit(1)) if not s else None; d=base64.b64decode(s, validate=False); open('android/app/release.keystore','wb').write(d); print('Decoded keystore bytes:', len(d))"
@@ -103,15 +103,34 @@ jobs:
               exit 1
             fi
 
+            RESOLVED_KEY_ALIAS="${ANDROID_KEY_ALIAS}"
+            if [ -z "$RESOLVED_KEY_ALIAS" ]; then
+              RESOLVED_KEY_ALIAS=$(keytool -list -v -keystore android/app/release.keystore -storepass "${ANDROID_KEYSTORE_PASSWORD}" | awk -F': ' '/Alias name:/{print $2; exit}')
+            fi
+
+            if [ -z "$RESOLVED_KEY_ALIAS" ]; then
+              echo "Could not resolve key alias from keystore"
+              exit 1
+            fi
+
+            if ! keytool -list -keystore android/app/release.keystore -storepass "${ANDROID_KEYSTORE_PASSWORD}" -alias "$RESOLVED_KEY_ALIAS" >/dev/null 2>&1; then
+              echo "Configured key alias does not exist in keystore: $RESOLVED_KEY_ALIAS"
+              keytool -list -v -keystore android/app/release.keystore -storepass "${ANDROID_KEYSTORE_PASSWORD}" | sed -n 's/^Alias name: /Available alias: /p'
+              exit 1
+            fi
+
+            echo "Using keystore alias: $RESOLVED_KEY_ALIAS"
+
             {
               echo "storeFile=release.keystore"
               echo "storePassword=${ANDROID_KEYSTORE_PASSWORD}"
-              echo "keyAlias=${ANDROID_KEY_ALIAS}"
+              echo "keyAlias=${RESOLVED_KEY_ALIAS}"
               echo "keyPassword=${ANDROID_KEY_PASSWORD}"
             } > android/key.properties
           else
             echo "Release signing secrets are required for tagged release builds."
-            echo "Please configure: ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD"
+            echo "Please configure: ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_PASSWORD"
+            echo "Optional: ANDROID_KEY_ALIAS (auto-detected if omitted)"
             exit 1
           fi
 

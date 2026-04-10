@@ -14,13 +14,42 @@
       },
       "oauth_client": [
         {
-          "client_id": "308259929553-6k3q1g76skt3id4e2mk9k6pr5l7gdtju.apps.googleusercontent.com",
+          "client_id": "308259929553-7cdc4g8fe7os799trig7hk7ugkuansov.apps.googleusercontent.com",
           "client_type": 1,
           "android_info": {
             "package_name": "com.example.reader_app",
-            "certificate_hash": "fa21a3e6a319b71b2dd0ef9573b22046dba5d55c"
+            "certificate_hash": "f7e9f7ec9bafd1de69934b2c9b52ee491d73bad7"
           }
         },
+        {
+          "client_id": "308259929553-9oame596io3s4lcj9cdb5db6v3i6f6rk.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBibgTrvBWtJBL4PGeIyahBwRlYKcjQ47k"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "308259929553-9oame596io3s4lcj9cdb5db6v3i6f6rk.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:308259929553:android:14f7828b9b9ca9d31c34f0",
+        "android_client_info": {
+          "package_name": "dev.fevirtus.reader"
+        }
+      },
+      "oauth_client": [
         {
           "client_id": "308259929553-9oame596io3s4lcj9cdb5db6v3i6f6rk.apps.googleusercontent.com",
           "client_type": 3
