@@ -147,9 +147,14 @@ jobs:
           echo "$CERT_OUTPUT"
 
           if [ -n "${EXPECTED_ANDROID_SHA1}" ]; then
-            AAB_SHA1=$(echo "$CERT_OUTPUT" | sed -n 's/^SHA1: //p' | head -n1)
-            AAB_SHA1_NORMALIZED=$(echo "$AAB_SHA1" | tr -d '[:space:]:-' | tr '[:lower:]' '[:upper:]')
-            EXPECTED_SHA1_NORMALIZED=$(echo "${EXPECTED_ANDROID_SHA1}" | tr -d '[:space:]:-' | tr '[:lower:]' '[:upper:]')
+            AAB_SHA1=$(echo "$CERT_OUTPUT" | awk -F'SHA1:' '/SHA1:/{print $2; exit}')
+            AAB_SHA1_NORMALIZED=$(echo "$AAB_SHA1" | tr -cd '[:xdigit:]' | tr '[:lower:]' '[:upper:]')
+            EXPECTED_SHA1_NORMALIZED=$(echo "${EXPECTED_ANDROID_SHA1}" | tr -cd '[:xdigit:]' | tr '[:lower:]' '[:upper:]')
+
+            if [ -z "$AAB_SHA1_NORMALIZED" ]; then
+              echo "Could not parse SHA-1 from keytool output"
+              exit 1
+            fi
 
             if [ "$AAB_SHA1_NORMALIZED" != "$EXPECTED_SHA1_NORMALIZED" ]; then
               echo "AAB SHA-1 mismatch"
