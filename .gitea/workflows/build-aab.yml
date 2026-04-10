@@ -1,0 +1,212 @@
+name: Build Android AAB
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Release tag (example: v1.0.10)"
+        required: false
+
+jobs:
+  build-aab:
+    runs-on: ubuntu-latest
+
+    env:
+      BASE_URL: ${{ secrets.BASE_URL }}
+      GOOGLE_SERVER_CLIENT_ID: ${{ secrets.GOOGLE_SERVER_CLIENT_ID }}
+      GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+      TOKEN: ${{ secrets.TOKEN }}
+      RELEASE_TAG: ""
+      ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+      ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+      ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+      ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+      EXPECTED_ANDROID_SHA1: ${{ secrets.EXPECTED_ANDROID_SHA1 }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK packages
+        run: |
+          sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+
+          set +e
+          yes | sdkmanager --licenses >/dev/null 2>&1
+          LICENSE_EXIT=$?
+          set -e
+
+          if [ "$LICENSE_EXIT" -ne 0 ] && [ "$LICENSE_EXIT" -ne 141 ]; then
+            echo "sdkmanager --licenses failed with exit code $LICENSE_EXIT"
+            exit "$LICENSE_EXIT"
+          fi
+
+      - name: Show Flutter and Dart version
+        run: |
+          flutter --version
+          flutter doctor -v
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Install release tooling
+        run: sudo apt-get update && sudo apt-get install -y jq
+
+      - name: Resolve release tag input
+        run: |
+          RESOLVED_TAG=""
+
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ] && [ -n "${INPUT_RELEASE_TAG:-}" ]; then
+            RESOLVED_TAG="${INPUT_RELEASE_TAG}"
+          elif [[ "${GITHUB_REF:-}" == refs/tags/* ]]; then
+            RESOLVED_TAG="${GITHUB_REF#refs/tags/}"
+          fi
+
+          echo "RELEASE_TAG=${RESOLVED_TAG}" >> "$GITHUB_ENV"
+          echo "Resolved RELEASE_TAG=${RESOLVED_TAG:-<empty>}"
+
+      - name: Prepare Android release signing
+        run: |
+          if [ -n "${ANDROID_KEYSTORE_BASE64}" ] && [ -n "${ANDROID_KEYSTORE_PASSWORD}" ] && [ -n "${ANDROID_KEY_ALIAS}" ] && [ -n "${ANDROID_KEY_PASSWORD}" ]; then
+            echo "Preparing release keystore from secrets"
+
+            if ! python3 -c "import base64,os,re,sys; s=os.environ.get('ANDROID_KEYSTORE_BASE64',''); s=s.strip().strip(chr(34)).strip(chr(39)); s=s.replace('\\n',''); s=re.sub(r'^data:[^,]*,','',s); s=re.sub(r'\\s+','',s); s=s + ('=' * (-len(s) % 4)); (print('ANDROID_KEYSTORE_BASE64 is empty after normalization'), sys.exit(1)) if not s else None; d=base64.b64decode(s, validate=False); open('android/app/release.keystore','wb').write(d); print('Decoded keystore bytes:', len(d))"
+            then
+              echo "Keystore decoding failed"
+              exit 1
+            fi
+
+            if [ ! -s android/app/release.keystore ]; then
+              echo "Decoded keystore file is empty"
+              exit 1
+            fi
+
+            if ! keytool -list -keystore android/app/release.keystore -storepass "${ANDROID_KEYSTORE_PASSWORD}" >/dev/null 2>&1; then
+              echo "Decoded keystore is invalid or ANDROID_KEYSTORE_PASSWORD is incorrect"
+              exit 1
+            fi
+
+            {
+              echo "storeFile=release.keystore"
+              echo "storePassword=${ANDROID_KEYSTORE_PASSWORD}"
+              echo "keyAlias=${ANDROID_KEY_ALIAS}"
+              echo "keyPassword=${ANDROID_KEY_PASSWORD}"
+            } > android/key.properties
+          else
+            echo "Release signing secrets are required for tagged release builds."
+            echo "Please configure: ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD"
+            exit 1
+          fi
+
+      - name: Build release AAB
+        run: |
+          BASE_URL_VALUE="${BASE_URL:-http://127.0.0.1:8000}"
+
+          FLUTTER_CMD=(
+            flutter build appbundle --release
+            --dart-define=BASE_URL=${BASE_URL_VALUE}
+          )
+
+          if [ -n "${GOOGLE_SERVER_CLIENT_ID}" ]; then
+            FLUTTER_CMD+=(--dart-define=GOOGLE_SERVER_CLIENT_ID=${GOOGLE_SERVER_CLIENT_ID})
+          fi
+
+          if [ -n "${GOOGLE_CLIENT_ID}" ]; then
+            FLUTTER_CMD+=(--dart-define=GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID})
+          fi
+
+          "${FLUTTER_CMD[@]}"
+
+      - name: Verify AAB signing certificate
+        run: |
+          AAB_PATH="build/app/outputs/bundle/release/app-release.aab"
+
+          if [ ! -f "$AAB_PATH" ]; then
+            echo "AAB not found at $AAB_PATH"
+            exit 1
+          fi
+
+          CERT_OUTPUT="$(keytool -printcert -jarfile "$AAB_PATH")"
+          echo "$CERT_OUTPUT"
+
+          if [ -n "${EXPECTED_ANDROID_SHA1}" ]; then
+            AAB_SHA1=$(echo "$CERT_OUTPUT" | sed -n 's/^SHA1: //p' | head -n1)
+            AAB_SHA1_NORMALIZED=$(echo "$AAB_SHA1" | tr -d '[:space:]:-' | tr '[:lower:]' '[:upper:]')
+            EXPECTED_SHA1_NORMALIZED=$(echo "${EXPECTED_ANDROID_SHA1}" | tr -d '[:space:]:-' | tr '[:lower:]' '[:upper:]')
+
+            if [ "$AAB_SHA1_NORMALIZED" != "$EXPECTED_SHA1_NORMALIZED" ]; then
+              echo "AAB SHA-1 mismatch"
+              echo "Expected (normalized): $EXPECTED_SHA1_NORMALIZED"
+              echo "Actual   (normalized): $AAB_SHA1_NORMALIZED"
+              echo "Tip: update EXPECTED_ANDROID_SHA1 to this signer if this is your intended upload key"
+              exit 1
+            fi
+          fi
+
+      - name: Create or update Gitea release and upload AAB
+        run: |
+          if [ -z "${RELEASE_TAG}" ]; then
+            echo "No release_tag provided. Build completed without creating a release."
+            exit 0
+          fi
+
+          if [ -z "${TOKEN}" ]; then
+            echo "Missing required secret: TOKEN"
+            exit 1
+          fi
+
+          AAB_PATH="build/app/outputs/bundle/release/app-release.aab"
+          if [ ! -f "$AAB_PATH" ]; then
+            echo "AAB not found at $AAB_PATH"
+            exit 1
+          fi
+
+          OWNER_REPO="${GITHUB_REPOSITORY}"
+          OWNER="${OWNER_REPO%%/*}"
+          REPO="${OWNER_REPO##*/}"
+          TAG="${RELEASE_TAG}"
+          API_BASE="${GITHUB_SERVER_URL}/api/v1"
+
+          RELEASE_JSON=$(curl -sS -X POST \
+            -H "Authorization: token ${TOKEN}" \
+            -H "Content-Type: application/json" \
+            "${API_BASE}/repos/${OWNER}/${REPO}/releases" \
+            -d "{\"tag_name\":\"${TAG}\",\"name\":\"${TAG}\",\"draft\":false,\"prerelease\":false}" \
+            || true)
+
+          RELEASE_ID=$(echo "$RELEASE_JSON" | jq -r '.id // empty')
+
+          if [ -z "$RELEASE_ID" ]; then
+            RELEASE_JSON=$(curl -sS \
+              -H "Authorization: token ${TOKEN}" \
+              "${API_BASE}/repos/${OWNER}/${REPO}/releases/tags/${TAG}")
+            RELEASE_ID=$(echo "$RELEASE_JSON" | jq -r '.id // empty')
+          fi
+
+          if [ -z "$RELEASE_ID" ]; then
+            echo "Could not resolve release ID for tag ${TAG}"
+            echo "$RELEASE_JSON"
+            exit 1
+          fi
+
+          curl -sS -X POST \
+            -H "Authorization: token ${TOKEN}" \
+            -F "attachment=@${AAB_PATH}" \
+            "${API_BASE}/repos/${OWNER}/${REPO}/releases/${RELEASE_ID}/assets?name=reader-app-${TAG}.aab"
