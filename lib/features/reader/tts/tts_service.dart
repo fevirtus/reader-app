@@ -367,6 +367,18 @@ class TtsNotifier extends StateNotifier<TtsState> {
     );
   }
 
+  String _sanitizeForTts(String raw) {
+    if (raw.isEmpty) return raw;
+
+    // Keep natural sentence flow while removing symbols that are usually read out noisily.
+    final cleaned = raw
+        .replaceAll(RegExp(r'[_$#^*+=~`|<>\\\[\]{}]'), ' ')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+
+    return cleaned;
+  }
+
   List<_TtsSegment> _buildSegments(
     String content, {
     String? title,
@@ -376,14 +388,17 @@ class TtsNotifier extends StateNotifier<TtsState> {
 
     final titleText = title?.trim();
     if (includeTitle && titleText != null && titleText.isNotEmpty) {
+      final sanitizedTitle = _sanitizeForTts(titleText);
+      if (sanitizedTitle.isNotEmpty) {
       segments.add(
         _TtsSegment(
-        text: titleText,
+        text: sanitizedTitle,
         paragraphIndex: -1,
         start: -1,
         end: -1,
         ),
       );
+      }
     }
 
     final paragraphs = content
@@ -400,6 +415,8 @@ class TtsNotifier extends StateNotifier<TtsState> {
       for (final match in sentenceMatches) {
         final sentence = match.group(0)?.trim() ?? '';
         if (sentence.isEmpty) continue;
+        final sanitizedSentence = _sanitizeForTts(sentence);
+        if (sanitizedSentence.isEmpty) continue;
 
         var start = paragraph.indexOf(sentence, cursor);
         if (start < 0) {
@@ -411,7 +428,7 @@ class TtsNotifier extends StateNotifier<TtsState> {
 
         segments.add(
           _TtsSegment(
-            text: sentence,
+            text: sanitizedSentence,
             paragraphIndex: pIndex,
             start: start,
             end: end,

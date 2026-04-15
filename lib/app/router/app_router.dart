@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
@@ -36,7 +37,16 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           ),
           GoRoute(
             path: RouteNames.search,
-            builder: (context, state) => const SearchScreen(),
+            builder: (context, state) {
+              final query = state.uri.queryParameters;
+              return SearchScreen(
+                key: ValueKey(state.uri.toString()),
+                initialQuery: query['q'],
+                initialGenre: query['genre'],
+                initialStatus: query['status'],
+                initialSort: query['sort'] ?? 'latest',
+              );
+            },
           ),
           GoRoute(
             path: RouteNames.genres,

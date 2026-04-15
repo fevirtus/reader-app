@@ -10,7 +10,18 @@ import '../../novel/providers/novels_provider.dart';
 import '../../genres/providers/genres_provider.dart';
 
 class SearchScreen extends ConsumerStatefulWidget {
-  const SearchScreen({super.key});
+  const SearchScreen({
+    super.key,
+    this.initialQuery,
+    this.initialGenre,
+    this.initialStatus,
+    this.initialSort = 'latest',
+  });
+
+  final String? initialQuery;
+  final String? initialGenre;
+  final String? initialStatus;
+  final String initialSort;
 
   @override
   ConsumerState<SearchScreen> createState() => _SearchScreenState();
@@ -18,6 +29,7 @@ class SearchScreen extends ConsumerStatefulWidget {
 
 class _SearchScreenState extends ConsumerState<SearchScreen> {
   final _controller = TextEditingController();
+  final _scrollController = ScrollController();
   Timer? _debounce;
   String? _selectedGenre;
   String? _selectedStatus;
@@ -36,10 +48,58 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
   ];
 
   @override
+  void initState() {
+    super.initState();
+    _scrollController.addListener(_onScroll);
+    _syncFromInitialParams(applyImmediately: false);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _applyFilters();
+    });
+  }
+
+  @override
+  void didUpdateWidget(covariant SearchScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final hasRouteFilterChange = oldWidget.initialQuery != widget.initialQuery ||
+        oldWidget.initialGenre != widget.initialGenre ||
+        oldWidget.initialStatus != widget.initialStatus ||
+        oldWidget.initialSort != widget.initialSort;
+    if (hasRouteFilterChange) {
+      _syncFromInitialParams(applyImmediately: true);
+    }
+  }
+
+  @override
   void dispose() {
+    _scrollController
+      ..removeListener(_onScroll)
+      ..dispose();
     _controller.dispose();
     _debounce?.cancel();
     super.dispose();
+  }
+
+  void _onScroll() {
+    if (!_scrollController.hasClients) return;
+    final position = _scrollController.position;
+    if (position.pixels >= position.maxScrollExtent - 240) {
+      ref.read(novelsProvider.notifier).loadNextPage();
+    }
+  }
+
+  void _syncFromInitialParams({required bool applyImmediately}) {
+    final incomingQuery = widget.initialQuery?.trim();
+    _controller.text = incomingQuery == null || incomingQuery.isEmpty ? '' : incomingQuery;
+    _selectedGenre = widget.initialGenre;
+    _selectedStatus = widget.initialStatus;
+    _sort = widget.initialSort;
+    if (applyImmediately) {
+      if (mounted) {
+        setState(() {});
+      }
+      _applyFilters();
+    }
   }
 
   void _onQueryChanged(String value) {
@@ -167,8 +227,25 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
                   return const Center(child: Text('Không tìm thấy truyện'));
                 }
                 return ListView.builder(
-                  itemCount: result.items.length,
-                  itemBuilder: (context, index) => _NovelListTile(novel: result.items[index]),
+                  controller: _scrollController,
+                  itemCount: result.items.length + (result.hasMore || result.isLoadingMore ? 1 : 0),
+                  itemBuilder: (context, index) {
+                    if (index >= result.items.length) {
+                      if (result.isLoadingMore) {
+                        return const Padding(
+                          padding: EdgeInsets.symmetric(vertical: 16),
+                          child: Center(child: CircularProgressIndicator()),
+                        );
+                      }
+                      // Trigger page load when user reaches the end.
+                      WidgetsBinding.instance.addPostFrameCallback((_) {
+                        if (!mounted) return;
+                        ref.read(novelsProvider.notifier).loadNextPage();
+                      });
+                      return const SizedBox(height: 32);
+                    }
+                    return _NovelListTile(novel: result.items[index]);
+                  },
                 );
               },
             ),
@@ -199,12 +276,14 @@ class _FilterChipDropdown extends StatelessWidget {
     return PopupMenuButton<String>(
       onSelected: onSelected,
       itemBuilder: (_) => items,
-      child: FilterChip(
-        label: Text(label),
-        selected: selected,
-        onSelected: (_) {},
-        deleteIcon: selected && onClear != null ? const Icon(Icons.close, size: 14) : null,
-        onDeleted: selected ? onClear : null,
+      child: IgnorePointer(
+        child: FilterChip(
+          label: Text(label),
+          selected: selected,
+          onSelected: (_) {},
+          deleteIcon: selected && onClear != null ? const Icon(Icons.close, size: 14) : null,
+          onDeleted: selected ? onClear : null,
+        ),
       ),
     );
   }

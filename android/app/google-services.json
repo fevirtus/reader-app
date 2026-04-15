@@ -14,6 +14,14 @@
       },
       "oauth_client": [
         {
+          "client_id": "308259929553-58cnurk30t6stf9ebj7p5jv1b5gftr29.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "dev.fevirtus.reader",
+            "certificate_hash": "72eb1a744349efea8402128e2d9c98c989ec62b5"
+          }
+        },
+        {
           "client_id": "308259929553-fd8teopc4chi2jjd8kr5vn9inn35ar6j.apps.googleusercontent.com",
           "client_type": 1,
           "android_info": {
