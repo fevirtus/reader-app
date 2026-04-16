@@ -28,17 +28,21 @@ class ReaderScreen extends ConsumerStatefulWidget {
 class _ReaderScreenState extends ConsumerState<ReaderScreen> {
   final ScrollController _scrollCtrl = ScrollController();
   Timer? _uiAutoHideTimer;
-  double _readingProgress = 0;
+  final ValueNotifier<double> _readingProgress = ValueNotifier(0);
+  final ValueNotifier<bool> _showQuickActions = ValueNotifier(true);
   String? _activeChapterId;
   bool _isRestoringProgress = false;
-  bool _showQuickActions = true;
   double _lastScrollOffset = 0;
   double _scrollDeltaSinceToggle = 0;
+  double _lastReportedOffset = 0;
+  DateTime? _lastReportedAt;
   int _chapterDirection = 0; // -1: previous, 1: next
   int _lastAutoScrolledParagraph = -1;
   int _lastTtsCompletedCount = 0;
   String? _autoStartQueuedChapterId;
   final List<GlobalKey> _paragraphKeys = [];
+  String? _sentenceSlicesChapterId;
+  List<List<_SentenceSlice>> _sentenceSlicesByParagraph = const [];
 
   List<String> _paragraphsOf(String content) => content
       .split(RegExp(r'\n+'))
@@ -69,37 +73,30 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
 
   Widget _buildParagraphText({
     required BuildContext context,
-    required String paragraph,
+    required List<_SentenceSlice> sentenceSlices,
     required TextStyle style,
+    required TextStyle highlightStyle,
     required TextAlign textAlign,
     required bool isActiveParagraph,
     required int highlightStart,
     required int highlightEnd,
     required Function(int charOffset) onSentenceTap,
   }) {
-    final sentenceMatches = RegExp(r'[^.!?…]+[.!?…]*').allMatches(paragraph).toList();
-
-    if (sentenceMatches.isEmpty) {
+    if (sentenceSlices.isEmpty) {
       return SelectableText(
-        paragraph,
+        '',
         textAlign: textAlign,
         style: style,
         onTap: () => onSentenceTap(0),
       );
     }
 
-    final highlightStyle = style.copyWith(
-      backgroundColor: Theme.of(context).colorScheme.primary.withAlpha(80),
-      fontWeight: FontWeight.w600,
-    );
-
     return SelectableText.rich(
       TextSpan(
         style: style,
-        children: sentenceMatches.map((match) {
-          final sentence = match.group(0)!;
-          final start = match.start;
-          final end = match.end;
+        children: sentenceSlices.map((slice) {
+          final start = slice.start;
+          final end = slice.end;
 
           final isCurrentSpoken = isActiveParagraph &&
               highlightStart >= 0 &&
@@ -108,7 +105,7 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
               end <= highlightEnd;
 
           return TextSpan(
-            text: sentence,
+            text: slice.text,
             style: isCurrentSpoken ? highlightStyle : null,
             recognizer: TapGestureRecognizer()..onTap = () => onSentenceTap(start),
           );
@@ -116,6 +113,45 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
       ),
       textAlign: textAlign,
     );
+  }
+
+  List<List<_SentenceSlice>> _sentenceSlicesForChapter(
+    ChapterModel chapter,
+    List<String> paragraphs,
+  ) {
+    if (_sentenceSlicesChapterId == chapter.id &&
+        _sentenceSlicesByParagraph.length == paragraphs.length) {
+      return _sentenceSlicesByParagraph;
+    }
+
+    final sentencePattern = RegExp(r'[^.!?…]+[.!?…]*');
+    final parsed = <List<_SentenceSlice>>[];
+
+    for (final paragraph in paragraphs) {
+      final matches = sentencePattern.allMatches(paragraph).toList();
+      if (matches.isEmpty) {
+        parsed.add([
+          _SentenceSlice(text: paragraph, start: 0, end: paragraph.length),
+        ]);
+        continue;
+      }
+
+      parsed.add(
+        matches
+            .map(
+              (match) => _SentenceSlice(
+                text: match.group(0)!,
+                start: match.start,
+                end: match.end,
+              ),
+            )
+            .toList(),
+      );
+    }
+
+    _sentenceSlicesChapterId = chapter.id;
+    _sentenceSlicesByParagraph = parsed;
+    return parsed;
   }
 
   void _ensureParagraphKeys(int count) {
@@ -183,9 +219,7 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
   void initState() {
     super.initState();
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _scrollCtrl.addListener(_onScroll);
-    });
+    _scrollCtrl.addListener(_onScroll);
   }
 
   /// Handle TTS state transitions that require navigation or restarts.
@@ -235,13 +269,29 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
     _uiAutoHideTimer?.cancel();
     _scrollCtrl.removeListener(_onScroll);
     _scrollCtrl.dispose();
+    _readingProgress.dispose();
+    _showQuickActions.dispose();
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     super.dispose();
   }
 
+  bool _shouldReportScroll(double offset) {
+    final now = DateTime.now();
+    final elapsedMs = _lastReportedAt == null
+        ? 1000
+        : now.difference(_lastReportedAt!).inMilliseconds;
+    final delta = (offset - _lastReportedOffset).abs();
+    return delta >= 24 || elapsedMs >= 700;
+  }
+
   void _onScroll() {
     if (_isRestoringProgress) return;
-    ref.read(readerProvider.notifier).updateScroll(_scrollCtrl.offset);
+    final offset = _scrollCtrl.hasClients ? _scrollCtrl.offset : 0.0;
+    if (_shouldReportScroll(offset)) {
+      _lastReportedOffset = offset;
+      _lastReportedAt = DateTime.now();
+      ref.read(readerProvider.notifier).updateScroll(offset);
+    }
 
     final currentOffset = _scrollCtrl.hasClients ? _scrollCtrl.offset : _lastScrollOffset;
     final delta = currentOffset - _lastScrollOffset;
@@ -252,12 +302,12 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
       _scrollDeltaSinceToggle = delta;
     }
 
-    if (_showQuickActions && currentOffset > 120 && _scrollDeltaSinceToggle > 56) {
-      setState(() => _showQuickActions = false);
+    if (_showQuickActions.value && currentOffset > 120 && _scrollDeltaSinceToggle > 56) {
+      _showQuickActions.value = false;
       _scrollDeltaSinceToggle = 0;
-    } else if (!_showQuickActions &&
+    } else if (!_showQuickActions.value &&
         (_scrollDeltaSinceToggle < -36 || currentOffset <= 40)) {
-      setState(() => _showQuickActions = true);
+      _showQuickActions.value = true;
       _scrollDeltaSinceToggle = 0;
     }
     _lastScrollOffset = currentOffset;
@@ -265,21 +315,42 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
     if (!_scrollCtrl.hasClients) return;
     final max = _scrollCtrl.position.maxScrollExtent;
     final next = max <= 0 ? 0.0 : (_scrollCtrl.offset / max).clamp(0.0, 1.0);
-    if ((next - _readingProgress).abs() > 0.01) {
-      setState(() => _readingProgress = next);
+    if ((next - _readingProgress.value).abs() > 0.02) {
+      _readingProgress.value = next;
     }
   }
 
   Future<void> _initializeChapterSession(ChapterModel chapter) async {
     if (_activeChapterId == chapter.id) return;
+    final previousChapterId = _activeChapterId;
+    final switchedChapter = previousChapterId != null && previousChapterId != chapter.id;
     _activeChapterId = chapter.id;
-    _readingProgress = 0;
+    _readingProgress.value = 0;
+    _showQuickActions.value = true;
+    _lastScrollOffset = 0;
+    _scrollDeltaSinceToggle = 0;
+    _lastReportedOffset = 0;
+    _lastReportedAt = null;
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_scrollCtrl.hasClients) return;
+      _isRestoringProgress = true;
+      _scrollCtrl.jumpTo(0);
+      _isRestoringProgress = false;
+    });
 
     ref.read(readerProvider.notifier).open(
           chapter.novelId,
           chapter.id,
           chapter.number,
         );
+
+    _consumePendingAutoStartForChapter(chapter);
+
+    if (switchedChapter) {
+      ref.read(readerProvider.notifier).resetCurrentChapterProgress();
+      return;
+    }
 
     final localStore = ref.read(localStoreProvider);
     final saved = await localStore.loadProgress(chapter.novelId);
@@ -297,6 +368,8 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
       _isRestoringProgress = true;
       _scrollCtrl.jumpTo(target);
       _isRestoringProgress = false;
+      _lastReportedOffset = target;
+      _lastReportedAt = DateTime.now();
       _onScroll();
     });
   }
@@ -323,6 +396,7 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
     if (prevId == null) return;
     setState(() => _chapterDirection = -1);
     HapticFeedback.selectionClick();
+    _queueAutoStartIfReadingCurrentChapter(chapter.id, prevId);
     context.pushReplacement(RouteNames.readerChapter(prevId));
   }
 
@@ -331,7 +405,38 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
     if (nextId == null) return;
     setState(() => _chapterDirection = 1);
     HapticFeedback.selectionClick();
+    _queueAutoStartIfReadingCurrentChapter(chapter.id, nextId);
     context.pushReplacement(RouteNames.readerChapter(nextId));
+  }
+
+  void _queueAutoStartIfReadingCurrentChapter(
+    String currentChapterId,
+    String targetChapterId,
+  ) {
+    final tts = ref.read(ttsProvider);
+    final isCurrentlyReading = tts.contentKey == currentChapterId &&
+        (tts.status == TtsStatus.playing || tts.status == TtsStatus.paused);
+    if (!isCurrentlyReading) return;
+    ref.read(ttsProvider.notifier).scheduleAutoStartForChapter(targetChapterId);
+  }
+
+  void _consumePendingAutoStartForChapter(ChapterModel chapter) {
+    final tts = ref.read(ttsProvider);
+    if (tts.pendingAutoStartChapterId != chapter.id) return;
+    if (_autoStartQueuedChapterId == chapter.id) return;
+
+    _autoStartQueuedChapterId = chapter.id;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final notifier = ref.read(ttsProvider.notifier);
+      notifier.clearPendingAutoStartChapter();
+      notifier.startReading(
+        chapter.content,
+        contentKey: chapter.id,
+        title: 'Chương ${chapter.number}: ${chapter.title}',
+      );
+      _autoStartQueuedChapterId = null;
+    });
   }
 
   Future<void> _scrollToTop() async {
@@ -411,6 +516,10 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
                                 onTap: () {
                                   Navigator.of(context).pop();
                                   if (!isCurrent) {
+                                    _queueAutoStartIfReadingCurrentChapter(
+                                      currentChapter.id,
+                                      item.id,
+                                    );
                                     context.pushReplacement(RouteNames.readerChapter(item.id));
                                   }
                                 },
@@ -881,11 +990,28 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
         data: (chapter) {
           final paragraphs = _paragraphsOf(chapter.content);
           _ensureParagraphKeys(paragraphs.length);
+          final sentenceSlicesByParagraph =
+              _sentenceSlicesForChapter(chapter, paragraphs);
           final textAlign = _textAlignFor(settings.textAlign);
           final novelAsync = ref.watch(novelDetailProvider(chapter.novelId));
           final tts = ref.watch(ttsProvider);
           final shouldHighlightTts = tts.contentKey == chapter.id &&
               (tts.status == TtsStatus.playing || tts.status == TtsStatus.paused);
+          final paragraphStyle = TextStyle(
+            color: readerTextColor,
+            fontSize: settings.fontSize,
+            height: settings.lineHeight,
+            letterSpacing: settings.letterSpacing,
+            fontFamily: settings.fontFamily == 'serif'
+                ? 'Georgia'
+                : settings.fontFamily == 'mono'
+                    ? 'Courier'
+                    : null,
+          );
+          final paragraphHighlightStyle = paragraphStyle.copyWith(
+            backgroundColor: Theme.of(context).colorScheme.primary.withAlpha(80),
+            fontWeight: FontWeight.w600,
+          );
 
 
           _maybeAutoScrollToTtsParagraph(tts, paragraphs.length);
@@ -901,16 +1027,21 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
               color: readerBackground,
               child: Column(
                 children: [
-                  _TopBar(
-                    title: _chapterTopBarTitle(chapter),
-                    progress: _readingProgress,
-                    onOpenSettings: () => _openReadingSettingsSheet(
-                      chapter.content,
-                      chapter.id,
-                      'Chương ${chapter.number}: ${chapter.title}',
-                    ),
-                    barBackgroundColor: readerBackground,
-                    foregroundColor: readerTextColor,
+                  ValueListenableBuilder<double>(
+                    valueListenable: _readingProgress,
+                    builder: (context, progress, _) {
+                      return _TopBar(
+                        title: _chapterTopBarTitle(chapter),
+                        progress: progress,
+                        onOpenSettings: () => _openReadingSettingsSheet(
+                          chapter.content,
+                          chapter.id,
+                          'Chương ${chapter.number}: ${chapter.title}',
+                        ),
+                        barBackgroundColor: readerBackground,
+                        foregroundColor: readerTextColor,
+                      );
+                    },
                   ),
                   Expanded(
                     child: AnimatedSwitcher(
@@ -934,107 +1065,136 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
                         key: ValueKey(chapter.id),
                         child: Scrollbar(
                           controller: _scrollCtrl,
-                          child: SingleChildScrollView(
+                          child: CustomScrollView(
                             controller: _scrollCtrl,
-                            padding: EdgeInsets.fromLTRB(
-                              settings.horizontalPadding,
-                              16,
-                              settings.horizontalPadding,
-                              24,
-                            ),
-                            child: Align(
-                              alignment: Alignment.topCenter,
-                              child: ConstrainedBox(
-                                constraints: const BoxConstraints(maxWidth: 760),
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    novelAsync.when(
-                                      loading: () => Text(
-                                        'Đang tải tên truyện...',
-                                        style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                                              color: readerMutedColor,
-                                            ),
-                                      ),
-                                      error: (_, _) => const SizedBox.shrink(),
-                                      data: (novel) => Text(
-                                        novel.title,
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                        style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                                              color: readerMutedColor,
-                                              letterSpacing: 0.2,
-                                            ),
-                                      ),
-                                    ),
-                                    const SizedBox(height: 4),
-                                    Text(
-                                      'Chương ${chapter.number}: ${chapter.title}',
-                                      style: Theme.of(context)
-                                          .textTheme
-                                          .titleLarge
-                                          ?.copyWith(color: readerTextColor),
-                                    ),
-                                    const SizedBox(height: 20),
-                                    if (chapter.content.trim().isEmpty)
-                                      Text(
-                                        'Chương này hiện chưa có nội dung.',
-                                        style: Theme.of(context)
-                                            .textTheme
-                                            .bodyMedium
-                                            ?.copyWith(color: readerMutedColor),
-                                      )
-                                    else
-                                      Column(
-                                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                            slivers: [
+                              SliverPadding(
+                                padding: EdgeInsets.fromLTRB(
+                                  settings.horizontalPadding,
+                                  16,
+                                  settings.horizontalPadding,
+                                  chapter.content.trim().isEmpty ? 24 : 0,
+                                ),
+                                sliver: SliverToBoxAdapter(
+                                  child: Align(
+                                    alignment: Alignment.topCenter,
+                                    child: ConstrainedBox(
+                                      constraints: const BoxConstraints(maxWidth: 760),
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
                                         children: [
-                                          for (var index = 0; index < paragraphs.length; index++)
-                                            Padding(
-                                              key: _paragraphKeys[index],
-                                              padding: EdgeInsets.only(
-                                                bottom: index == paragraphs.length - 1
-                                                    ? 0
-                                                    : settings.paragraphSpacing,
-                                              ),
-                                              child: _buildParagraphText(
-                                                context: context,
-                                                paragraph: paragraphs[index],
-                                                textAlign: textAlign,
-                                                style: TextStyle(
-                                                  color: readerTextColor,
-                                                  fontSize: settings.fontSize,
-                                                  height: settings.lineHeight,
-                                                  letterSpacing: settings.letterSpacing,
-                                                  fontFamily: settings.fontFamily == 'serif'
-                                                      ? 'Georgia'
-                                                      : settings.fontFamily == 'mono'
-                                                          ? 'Courier'
-                                                          : null,
-                                                ),
-                                                isActiveParagraph: shouldHighlightTts &&
-                                                  tts.activeParagraphIndex == index,
-                                                highlightStart: tts.progressStart,
-                                                highlightEnd: tts.progressEnd,
-                                                onSentenceTap: (charOffset) {
-                                                  ref.read(ttsProvider.notifier).startReading(
-                                                    chapter.content,
-                                                    contentKey: chapter.id,
-                                                    title: 'Chương ${chapter.number}: ${chapter.title}',
-                                                    startParagraphIndex: index,
-                                                    startCharOffset: charOffset,
-                                                  );
-                                                },
-                                              ),
+                                          novelAsync.when(
+                                            loading: () => Text(
+                                              'Đang tải tên truyện...',
+                                              style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                                                    color: readerMutedColor,
+                                                  ),
+                                            ),
+                                            error: (_, _) => const SizedBox.shrink(),
+                                            data: (novel) => Text(
+                                              novel.title,
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
+                                              style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                                                    color: readerMutedColor,
+                                                    letterSpacing: 0.2,
+                                                  ),
+                                            ),
+                                          ),
+                                          const SizedBox(height: 4),
+                                          Text(
+                                            'Chương ${chapter.number}: ${chapter.title}',
+                                            style: Theme.of(context)
+                                                .textTheme
+                                                .titleLarge
+                                                ?.copyWith(color: readerTextColor),
+                                          ),
+                                          const SizedBox(height: 20),
+                                          if (chapter.content.trim().isEmpty)
+                                            Text(
+                                              'Chương này hiện chưa có nội dung.',
+                                              style: Theme.of(context)
+                                                  .textTheme
+                                                  .bodyMedium
+                                                  ?.copyWith(color: readerMutedColor),
                                             ),
                                         ],
                                       ),
-                                    const SizedBox(height: 40),
-                                    _NavButtons(chapter: chapter),
-                                    const SizedBox(height: 92),
-                                  ],
+                                    ),
+                                  ),
                                 ),
                               ),
-                            ),
+                              if (chapter.content.trim().isNotEmpty)
+                                SliverPadding(
+                                  padding: EdgeInsets.fromLTRB(
+                                    settings.horizontalPadding,
+                                    0,
+                                    settings.horizontalPadding,
+                                    0,
+                                  ),
+                                  sliver: SliverList.builder(
+                                    itemCount: paragraphs.length,
+                                    itemBuilder: (context, index) {
+                                      final sentenceSlices = sentenceSlicesByParagraph[index];
+                                      return Align(
+                                        alignment: Alignment.topCenter,
+                                        child: ConstrainedBox(
+                                          constraints: const BoxConstraints(maxWidth: 760),
+                                          child: Padding(
+                                            key: _paragraphKeys[index],
+                                            padding: EdgeInsets.only(
+                                              bottom: index == paragraphs.length - 1
+                                                  ? 0
+                                                  : settings.paragraphSpacing,
+                                            ),
+                                            child: _buildParagraphText(
+                                              context: context,
+                                              sentenceSlices: sentenceSlices,
+                                              textAlign: textAlign,
+                                              style: paragraphStyle,
+                                              highlightStyle: paragraphHighlightStyle,
+                                              isActiveParagraph: shouldHighlightTts &&
+                                                  tts.activeParagraphIndex == index,
+                                              highlightStart: tts.progressStart,
+                                              highlightEnd: tts.progressEnd,
+                                              onSentenceTap: (charOffset) {
+                                                ref.read(ttsProvider.notifier).startReading(
+                                                  chapter.content,
+                                                  contentKey: chapter.id,
+                                                  title: 'Chương ${chapter.number}: ${chapter.title}',
+                                                  startParagraphIndex: index,
+                                                  startCharOffset: charOffset,
+                                                );
+                                              },
+                                            ),
+                                          ),
+                                        ),
+                                      );
+                                    },
+                                  ),
+                                ),
+                              SliverPadding(
+                                padding: EdgeInsets.fromLTRB(
+                                  settings.horizontalPadding,
+                                  40,
+                                  settings.horizontalPadding,
+                                  92,
+                                ),
+                                sliver: SliverToBoxAdapter(
+                                  child: Align(
+                                    alignment: Alignment.topCenter,
+                                    child: ConstrainedBox(
+                                      constraints: const BoxConstraints(maxWidth: 760),
+                                      child: _NavButtons(
+                                        chapter: chapter,
+                                        onGoPrevious: () => _goToPreviousChapter(chapter),
+                                        onGoNext: () => _goToNextChapter(chapter),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ],
                           ),
                         ),
                       ),
@@ -1047,36 +1207,41 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
         },
       ),
       floatingActionButton: chapterAsync.hasValue
-          ? AnimatedSlide(
-              duration: const Duration(milliseconds: 180),
-              curve: Curves.easeOut,
-              offset: _showQuickActions ? Offset.zero : const Offset(0, 1.4),
-              child: AnimatedOpacity(
-                duration: const Duration(milliseconds: 140),
-                opacity: _showQuickActions ? 1 : 0,
-                child: Builder(
-                  builder: (context) {
-                    final chapter = chapterAsync.value!;
-                    return Column(
-                      mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: CrossAxisAlignment.end,
-                      children: [
-                        FloatingActionButton.small(
-                          heroTag: 'reader-scroll-top',
-                          onPressed: _scrollToTop,
-                          child: const Icon(Icons.vertical_align_top_rounded, size: 20),
-                        ),
-                        const SizedBox(height: 10),
-                        FloatingActionButton.small(
-                          heroTag: 'reader-toc',
-                          onPressed: () => _openChapterToc(chapter),
-                          child: const Icon(Icons.list_alt_rounded, size: 20),
-                        ),
-                      ],
-                    );
-                  },
-                ),
-              ),
+          ? ValueListenableBuilder<bool>(
+              valueListenable: _showQuickActions,
+              builder: (context, showQuickActions, _) {
+                return AnimatedSlide(
+                  duration: const Duration(milliseconds: 180),
+                  curve: Curves.easeOut,
+                  offset: showQuickActions ? Offset.zero : const Offset(0, 1.4),
+                  child: AnimatedOpacity(
+                    duration: const Duration(milliseconds: 140),
+                    opacity: showQuickActions ? 1 : 0,
+                    child: Builder(
+                      builder: (context) {
+                        final chapter = chapterAsync.value!;
+                        return Column(
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.end,
+                          children: [
+                            FloatingActionButton.small(
+                              heroTag: 'reader-scroll-top',
+                              onPressed: _scrollToTop,
+                              child: const Icon(Icons.vertical_align_top_rounded, size: 20),
+                            ),
+                            const SizedBox(height: 10),
+                            FloatingActionButton.small(
+                              heroTag: 'reader-toc',
+                              onPressed: () => _openChapterToc(chapter),
+                              child: const Icon(Icons.list_alt_rounded, size: 20),
+                            ),
+                          ],
+                        );
+                      },
+                    ),
+                  ),
+                );
+              },
             )
           : null,
       bottomNavigationBar: chapterAsync.whenOrNull(
@@ -1102,6 +1267,18 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
       ),
     );
   }
+}
+
+class _SentenceSlice {
+  const _SentenceSlice({
+    required this.text,
+    required this.start,
+    required this.end,
+  });
+
+  final String text;
+  final int start;
+  final int end;
 }
 
 class _TopBar extends StatelessWidget {
@@ -1373,20 +1550,25 @@ class _TabLabel extends StatelessWidget {
   }
 }
 
-class _NavButtons extends ConsumerWidget {
+class _NavButtons extends StatelessWidget {
   final ChapterModel chapter;
-  const _NavButtons({required this.chapter});
+  final VoidCallback onGoPrevious;
+  final VoidCallback onGoNext;
+
+  const _NavButtons({
+    required this.chapter,
+    required this.onGoPrevious,
+    required this.onGoNext,
+  });
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  Widget build(BuildContext context) {
     return Row(
       children: [
         if (chapter.prevChapterId != null)
           Expanded(
             child: OutlinedButton.icon(
-              onPressed: () => context.pushReplacement(
-                RouteNames.readerChapter(chapter.prevChapterId!),
-              ),
+              onPressed: onGoPrevious,
               icon: const Icon(Icons.chevron_left),
               label: Text('Chương ${chapter.prevChapterNumber ?? '?'}'),
             ),
@@ -1396,9 +1578,7 @@ class _NavButtons extends ConsumerWidget {
         if (chapter.nextChapterId != null)
           Expanded(
             child: FilledButton.icon(
-              onPressed: () => context.pushReplacement(
-                RouteNames.readerChapter(chapter.nextChapterId!),
-              ),
+              onPressed: onGoNext,
               icon: const Icon(Icons.chevron_right),
               label: Text('Chương ${chapter.nextChapterNumber ?? '?'}'),
             ),

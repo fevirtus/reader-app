@@ -61,6 +61,21 @@ class ReaderNotifier extends StateNotifier<ReadingProgress?> {
       scrollOffset: 0,
     );
   }
+
+  void resetCurrentChapterProgress() {
+    if (state == null) return;
+
+    state = ReadingProgress(
+      novelId: state!.novelId,
+      chapterId: state!.chapterId,
+      chapterNumber: state!.chapterNumber,
+      scrollOffset: 0,
+    );
+
+    // Persist immediately so a freshly opened chapter always resumes at top.
+    unawaited(_persistProgress(state!.chapterId, state!.chapterNumber, 0));
+  }
+
   void updateScroll(double offset) {
     if (state == null) return;
     state = ReadingProgress(

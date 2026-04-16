@@ -16,6 +16,7 @@ import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.os.Parcelable
+import android.os.PowerManager
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
 import android.util.Log
@@ -46,6 +47,8 @@ class ReaderTtsMediaService : Service(), TextToSpeech.OnInitListener {
 		private const val BASE_SPEED = 0.9
 		private const val TAG = "ReaderTtsMediaService"
 		private const val HEALTH_CHECK_INTERVAL_MS = 1500L
+		private const val START_GRACE_PERIOD_MS = 10_000L
+		private const val MAX_SEGMENT_RETRIES_BEFORE_SKIP = 4
 
 		const val ACTION_INIT = "com.example.reader_app.tts.INIT"
 		const val ACTION_START_READING = "com.example.reader_app.tts.START_READING"
@@ -154,7 +157,9 @@ class ReaderTtsMediaService : Service(), TextToSpeech.OnInitListener {
 	private lateinit var notificationManager: NotificationManagerCompat
 	private lateinit var mediaSession: MediaSessionCompat
 	private lateinit var audioManager: AudioManager
+	private lateinit var powerManager: PowerManager
 	private var audioFocusRequest: AudioFocusRequest? = null
+	private var wakeLock: PowerManager.WakeLock? = null
 	private var tts: TextToSpeech? = null
 	private var isTtsReady = false
 	private var isForegroundActive = false
@@ -210,6 +215,7 @@ class ReaderTtsMediaService : Service(), TextToSpeech.OnInitListener {
 		super.onCreate()
 		notificationManager = NotificationManagerCompat.from(this)
 		audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+		powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
 		createNotificationChannel()
 		setupMediaSession()
 		setupTextToSpeech()
@@ -300,7 +306,7 @@ class ReaderTtsMediaService : Service(), TextToSpeech.OnInitListener {
 						if (!isActiveUtterance(utteranceId)) return@post
 						if (utteranceId != currentUtteranceId) return@post
 						clearUtteranceRuntimeState()
-						handlePlaybackFailure()
+						recoverFromSilentPlayback("utterance_error_$errorCode")
 					}
 				}
 			},
@@ -319,6 +325,7 @@ class ReaderTtsMediaService : Service(), TextToSpeech.OnInitListener {
 		} else {
 			status = "idle"
 		}
+		syncPowerState()
 		syncNotificationState()
 		publishSnapshot()
 	}
@@ -348,6 +355,14 @@ class ReaderTtsMediaService : Service(), TextToSpeech.OnInitListener {
 
 	private fun applyVoiceAndSpeedSettings() {
 		val ttsInstance = tts ?: return
+		if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+			ttsInstance.setAudioAttributes(
+				AudioAttributes.Builder()
+					.setUsage(AudioAttributes.USAGE_MEDIA)
+					.setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+					.build(),
+			)
+		}
 		ttsInstance.setSpeechRate(speed.toFloat())
 		val locale = language.toLocale()
 		ttsInstance.setLanguage(locale)
@@ -378,6 +393,7 @@ class ReaderTtsMediaService : Service(), TextToSpeech.OnInitListener {
 		pausedByAudioFocus = false
 		pendingReplayAfterInit = false
 		tts?.stop()
+		syncPowerState()
 		publishSnapshot()
 
 		if (!isTtsReady) return
@@ -391,6 +407,7 @@ class ReaderTtsMediaService : Service(), TextToSpeech.OnInitListener {
 		status = "paused"
 		pendingReplayAfterInit = false
 		tts?.stop()
+		syncPowerState()
 		syncNotificationState()
 		publishSnapshot()
 	}
@@ -401,6 +418,7 @@ class ReaderTtsMediaService : Service(), TextToSpeech.OnInitListener {
 		sessionGeneration += 1
 		clearUtteranceRuntimeState()
 		pendingReplayAfterInit = false
+		syncPowerState()
 		publishSnapshot()
 		if (!isTtsReady) return
 		speakCurrentSegment(forceRestart = true)
@@ -418,6 +436,7 @@ class ReaderTtsMediaService : Service(), TextToSpeech.OnInitListener {
 		}
 		tts?.stop()
 		abandonAudioFocus()
+		syncPowerState()
 		syncNotificationState()
 		publishSnapshot()
 		stopSelf()
@@ -433,6 +452,7 @@ class ReaderTtsMediaService : Service(), TextToSpeech.OnInitListener {
 		status = "playing"
 		pendingReplayAfterInit = false
 		tts?.stop()
+		syncPowerState()
 		publishSnapshot()
 		if (!isTtsReady) return
 		speakCurrentSegment(forceRestart = true)
@@ -449,6 +469,7 @@ class ReaderTtsMediaService : Service(), TextToSpeech.OnInitListener {
 			completedCount += 1
 			clearUtteranceRuntimeState()
 			abandonAudioFocus()
+			syncPowerState()
 			syncNotificationState()
 			publishSnapshot()
 			stopSelf()
@@ -460,10 +481,12 @@ class ReaderTtsMediaService : Service(), TextToSpeech.OnInitListener {
 	}
 
 	private fun handlePlaybackFailure() {
+		Log.e(TAG, "Playback stopped after recovery failed at index=$currentIndex contentKey=$contentKey")
 		status = "idle"
 		clearUtteranceRuntimeState()
 		pendingReplayAfterInit = false
 		abandonAudioFocus()
+		syncPowerState()
 		syncNotificationState()
 		publishSnapshot()
 		stopSelf()
@@ -487,6 +510,7 @@ class ReaderTtsMediaService : Service(), TextToSpeech.OnInitListener {
 		if (!forceRestart) {
 			currentSegmentRetry = 0
 		}
+		syncPowerState()
 		syncNotificationState()
 		publishSnapshot()
 
@@ -496,15 +520,20 @@ class ReaderTtsMediaService : Service(), TextToSpeech.OnInitListener {
 		currentUtteranceStarted = false
 		lastSpeakRequestTimeMs = System.currentTimeMillis()
 		scheduleUtteranceWatchdog(utteranceId)
-		val speakResult = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-			tts?.speak(segment.text, TextToSpeech.QUEUE_FLUSH, Bundle(), utteranceId)
-		} else {
-			@Suppress("DEPRECATION")
-			tts?.speak(segment.text, TextToSpeech.QUEUE_FLUSH, null)
+		val speakResult = try {
+			if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+				tts?.speak(segment.text, TextToSpeech.QUEUE_FLUSH, Bundle(), utteranceId)
+			} else {
+				@Suppress("DEPRECATION")
+				tts?.speak(segment.text, TextToSpeech.QUEUE_FLUSH, null)
+			}
+		} catch (e: Exception) {
+			Log.e(TAG, "speak() failed for index=$currentIndex", e)
+			null
 		}
 
-		if (speakResult == TextToSpeech.ERROR) {
-			recoverFromSilentPlayback("speak_error")
+		if (speakResult == null || speakResult == TextToSpeech.ERROR) {
+			recoverFromSilentPlayback("speak_error_or_null")
 		}
 	}
 
@@ -552,13 +581,13 @@ class ReaderTtsMediaService : Service(), TextToSpeech.OnInitListener {
 		}
 
 		clearUtteranceRuntimeState()
-		if (currentSegmentRetry >= 2) {
-			handlePlaybackFailure()
+		if (currentSegmentRetry >= MAX_SEGMENT_RETRIES_BEFORE_SKIP) {
+			skipCurrentSegmentAfterFailure(reason)
 			return
 		}
 
 		currentSegmentRetry += 1
-		if (currentSegmentRetry >= 2) {
+		if (currentSegmentRetry >= 3) {
 			rebuildTtsEngineForRecovery(reason)
 			return
 		}
@@ -574,6 +603,30 @@ class ReaderTtsMediaService : Service(), TextToSpeech.OnInitListener {
 		tts?.stop()
 		tts?.shutdown()
 		setupTextToSpeech()
+	}
+
+	private fun skipCurrentSegmentAfterFailure(reason: String) {
+		Log.e(
+			TAG,
+			"Skipping problematic segment after repeated recovery failures: reason=$reason index=$currentIndex total=${segments.size}",
+		)
+		clearUtteranceRuntimeState()
+		pendingReplayAfterInit = false
+
+		val nextIndex = currentIndex + 1
+		if (nextIndex >= segments.size) {
+			handlePlaybackFailure()
+			return
+		}
+
+		currentIndex = nextIndex
+		currentSegmentRetry = 0
+		publishSnapshot()
+		if (!isTtsReady) {
+			rebuildTtsEngineForRecovery("skip_after_failure")
+			return
+		}
+		speakCurrentSegment(forceRestart = false)
 	}
 
 	private fun runPlaybackHealthCheck() {
@@ -602,9 +655,10 @@ class ReaderTtsMediaService : Service(), TextToSpeech.OnInitListener {
 		if (!currentUtteranceStarted) {
 			if (!isSpeaking) {
 				// Allow a grace period after speak() is called before flagging as silent.
-				// onStart typically fires within ~100 ms; 4 s covers slow TTS initialisation.
+				// Some engines on mid/low-end devices need noticeably longer before
+				// firing onStart after many segments or after screen-off transitions.
 				val elapsedSinceSpeak = System.currentTimeMillis() - lastSpeakRequestTimeMs
-				if (elapsedSinceSpeak > 4_000L) {
+				if (elapsedSinceSpeak > START_GRACE_PERIOD_MS) {
 					recoverFromSilentPlayback("no_onStart_and_not_speaking")
 				}
 			}
@@ -659,6 +713,28 @@ class ReaderTtsMediaService : Service(), TextToSpeech.OnInitListener {
 			@Suppress("DEPRECATION")
 			audioManager.abandonAudioFocus(audioFocusListener)
 		}
+	}
+
+	private fun syncPowerState() {
+		val shouldHoldWakeLock = backgroundModeEnabled && status == "playing"
+		if (shouldHoldWakeLock) {
+			if (wakeLock?.isHeld == true) return
+			wakeLock = powerManager.newWakeLock(
+				PowerManager.PARTIAL_WAKE_LOCK,
+				"reader_app:ReaderTtsPlayback"
+			).apply {
+				setReferenceCounted(false)
+				acquire()
+			}
+			return
+		}
+
+		wakeLock?.let {
+			if (it.isHeld) {
+				it.release()
+			}
+		}
+		wakeLock = null
 	}
 
 	private fun isActiveUtterance(utteranceId: String): Boolean {
@@ -789,6 +865,7 @@ class ReaderTtsMediaService : Service(), TextToSpeech.OnInitListener {
 
 	@SuppressLint("MissingPermission")
 	private fun syncNotificationState() {
+		syncPowerState()
 		updateMediaSessionState()
 		if (!backgroundModeEnabled) {
 			if (isForegroundActive) {
@@ -896,6 +973,7 @@ class ReaderTtsMediaService : Service(), TextToSpeech.OnInitListener {
 		tts?.stop()
 		tts?.shutdown()
 		abandonAudioFocus()
+		syncPowerState()
 		if (isForegroundActive) {
 			stopForeground(true)
 			isForegroundActive = false
