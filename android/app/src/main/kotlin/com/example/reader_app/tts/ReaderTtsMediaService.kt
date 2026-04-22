@@ -29,6 +29,7 @@ import android.support.v4.media.session.MediaSessionCompat
 import android.support.v4.media.session.PlaybackStateCompat
 import com.example.reader_app.R
 import kotlinx.parcelize.Parcelize
+import kotlin.math.min
 import java.util.Locale
 
 @Parcelize
@@ -47,7 +48,7 @@ class ReaderTtsMediaService : Service(), TextToSpeech.OnInitListener {
 		private const val BASE_SPEED = 0.9
 		private const val TAG = "ReaderTtsMediaService"
 		private const val HEALTH_CHECK_INTERVAL_MS = 1500L
-		private const val START_GRACE_PERIOD_MS = 10_000L
+		private const val START_GRACE_PERIOD_MS = 5_000L
 		private const val MAX_SEGMENT_RETRIES_BEFORE_SKIP = 4
 
 		const val ACTION_INIT = "com.example.reader_app.tts.INIT"
@@ -70,6 +71,8 @@ class ReaderTtsMediaService : Service(), TextToSpeech.OnInitListener {
 		const val EXTRA_VOICE_NAME = "voiceName"
 		const val EXTRA_BACKGROUND_MODE_ENABLED = "backgroundModeEnabled"
 		const val EXTRA_CLEAR_CONTENT_KEY = "clearContentKey"
+		const val EXTRA_STOP_REASON = "stopReason"
+		private const val STOP_REASON_USER = "user"
 
 		fun initialize(context: Context, backgroundModeEnabled: Boolean) {
 			context.startService(
@@ -121,6 +124,7 @@ class ReaderTtsMediaService : Service(), TextToSpeech.OnInitListener {
 			context.startService(Intent(context, ReaderTtsMediaService::class.java).apply {
 				action = ACTION_STOP
 				putExtra(EXTRA_CLEAR_CONTENT_KEY, clearContentKey)
+				putExtra(EXTRA_STOP_REASON, STOP_REASON_USER)
 			})
 
 		fun skipForward(context: Context) =
@@ -179,6 +183,13 @@ class ReaderTtsMediaService : Service(), TextToSpeech.OnInitListener {
 	private var currentUtteranceId: String? = null
 	private var currentUtteranceStarted = false
 	private var pendingReplayAfterInit = false
+	private var isRebuildingEngine = false
+	private var engineRebuildAttempt = 0
+	private var audioFocusRetryAttempt = 0
+	private var consecutivePlaybackRecoveryFailures = 0
+	private var pendingEngineRebuild: Runnable? = null
+	private var pendingAudioFocusRetry: Runnable? = null
+	private var pendingIdleStop: Runnable? = null
 	private var currentSegmentRetry = 0
 	private var consecutiveSilentHealthChecks = 0
 	private var utteranceWatchdog: Runnable? = null
@@ -226,6 +237,7 @@ class ReaderTtsMediaService : Service(), TextToSpeech.OnInitListener {
 	override fun onBind(intent: Intent?): IBinder? = null
 
 	override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+		Log.i(TAG, "onStartCommand action=${intent?.action} status=$status index=$currentIndex")
 		when (intent?.action) {
 			ACTION_INIT -> {
 				backgroundModeEnabled = intent.getBooleanExtra(
@@ -239,6 +251,7 @@ class ReaderTtsMediaService : Service(), TextToSpeech.OnInitListener {
 			ACTION_RESUME -> handleResume()
 			ACTION_STOP -> handleStop(
 				clearContentKey = intent.getBooleanExtra(EXTRA_CLEAR_CONTENT_KEY, true),
+				reason = intent.getStringExtra(EXTRA_STOP_REASON) ?: "unknown",
 			)
 			ACTION_SKIP_FORWARD -> handleSkip(1)
 			ACTION_SKIP_BACK -> handleSkip(-1)
@@ -306,7 +319,14 @@ class ReaderTtsMediaService : Service(), TextToSpeech.OnInitListener {
 						if (!isActiveUtterance(utteranceId)) return@post
 						if (utteranceId != currentUtteranceId) return@post
 						clearUtteranceRuntimeState()
-						recoverFromSilentPlayback("utterance_error_$errorCode")
+						// ERROR_SERVICE (-6) means the TTS engine process disconnected.
+						// Rebuild the engine immediately rather than retrying on a dead instance.
+						if (errorCode == TextToSpeech.ERROR_SERVICE ||
+							errorCode == TextToSpeech.ERROR_NOT_INSTALLED_YET) {
+							rebuildTtsEngineForRecovery("utterance_error_$errorCode")
+						} else {
+							recoverFromSilentPlayback("utterance_error_$errorCode")
+						}
 					}
 				}
 			},
@@ -314,8 +334,12 @@ class ReaderTtsMediaService : Service(), TextToSpeech.OnInitListener {
 	}
 
 	override fun onInit(initStatus: Int) {
+		isRebuildingEngine = false
 		isTtsReady = initStatus == TextToSpeech.SUCCESS
 		if (isTtsReady) {
+			engineRebuildAttempt = 0
+			consecutivePlaybackRecoveryFailures = 0
+			currentSegmentRetry = 0  // reset retry counter after successful engine reconnect
 			refreshAvailableVoices()
 			applyVoiceAndSpeedSettings()
 			if ((pendingReplayAfterInit || status == "playing") && segments.isNotEmpty()) {
@@ -323,7 +347,12 @@ class ReaderTtsMediaService : Service(), TextToSpeech.OnInitListener {
 				speakCurrentSegment(forceRestart = true)
 			}
 		} else {
-			status = "idle"
+			if (status == "playing" || pendingReplayAfterInit || segments.isNotEmpty()) {
+				status = "paused"
+				scheduleEngineRebuild("onInit_failed_$initStatus")
+			} else {
+				status = "idle"
+			}
 		}
 		syncPowerState()
 		syncNotificationState()
@@ -375,6 +404,7 @@ class ReaderTtsMediaService : Service(), TextToSpeech.OnInitListener {
 	}
 
 	private fun handleStartReading(intent: Intent) {
+		cancelIdleStop()
 		backgroundModeEnabled = intent.getBooleanExtra(
 			EXTRA_BACKGROUND_MODE_ENABLED,
 			backgroundModeEnabled,
@@ -414,6 +444,7 @@ class ReaderTtsMediaService : Service(), TextToSpeech.OnInitListener {
 
 	private fun handleResume() {
 		if (segments.isEmpty()) return
+		cancelIdleStop()
 		status = "playing"
 		sessionGeneration += 1
 		clearUtteranceRuntimeState()
@@ -424,8 +455,11 @@ class ReaderTtsMediaService : Service(), TextToSpeech.OnInitListener {
 		speakCurrentSegment(forceRestart = true)
 	}
 
-	private fun handleStop(clearContentKey: Boolean) {
+	private fun handleStop(clearContentKey: Boolean, reason: String) {
+		Log.i(TAG, "handleStop reason=$reason clearContentKey=$clearContentKey")
 		sessionGeneration += 1
+		clearScheduledRecoveries()
+		cancelIdleStop()
 		clearUtteranceRuntimeState()
 		status = "idle"
 		currentIndex = 0
@@ -467,12 +501,13 @@ class ReaderTtsMediaService : Service(), TextToSpeech.OnInitListener {
 			status = "idle"
 			currentIndex = 0
 			completedCount += 1
+			Log.i(TAG, "chapter_completed contentKey=$contentKey completedCount=$completedCount")
 			clearUtteranceRuntimeState()
 			abandonAudioFocus()
 			syncPowerState()
 			syncNotificationState()
 			publishSnapshot()
-			stopSelf()
+			scheduleIdleStop()
 			return
 		}
 
@@ -481,23 +516,35 @@ class ReaderTtsMediaService : Service(), TextToSpeech.OnInitListener {
 	}
 
 	private fun handlePlaybackFailure() {
-		Log.e(TAG, "Playback stopped after recovery failed at index=$currentIndex contentKey=$contentKey")
-		status = "idle"
-		clearUtteranceRuntimeState()
-		pendingReplayAfterInit = false
-		abandonAudioFocus()
+		consecutivePlaybackRecoveryFailures += 1
+		Log.e(
+			TAG,
+			"Playback failure at index=$currentIndex contentKey=$contentKey, recoveryAttempt=$consecutivePlaybackRecoveryFailures",
+		)
+		status = "paused"
+		pendingReplayAfterInit = true
+		if (consecutivePlaybackRecoveryFailures > 12) {
+			// Keep trying indefinitely but avoid a tight error loop.
+			consecutivePlaybackRecoveryFailures = 6
+		}
 		syncPowerState()
 		syncNotificationState()
 		publishSnapshot()
-		stopSelf()
+		scheduleEngineRebuild("playback_failure")
 	}
 
 	private fun speakCurrentSegment(forceRestart: Boolean) {
 		if (segments.isEmpty() || !isTtsReady) return
 		if (!requestAudioFocus()) {
-			handlePlaybackFailure()
+			pausedByAudioFocus = true
+			status = "paused"
+			syncPowerState()
+			syncNotificationState()
+			publishSnapshot()
+			scheduleAudioFocusRetry()
 			return
 		}
+		clearAudioFocusRetry()
 
 		val segment = segments.getOrNull(currentIndex) ?: run {
 			handlePlaybackFailure()
@@ -533,7 +580,12 @@ class ReaderTtsMediaService : Service(), TextToSpeech.OnInitListener {
 		}
 
 		if (speakResult == null || speakResult == TextToSpeech.ERROR) {
-			recoverFromSilentPlayback("speak_error_or_null")
+			// speak() returning ERROR/null almost always means the TTS engine process died
+			// (visible in logcat as "Disconnected from TTS engine").
+			// Rebuild immediately instead of burning 3 retries on a dead engine.
+			if (!isRebuildingEngine) {
+				rebuildTtsEngineForRecovery("speak_error_or_null")
+			}
 		}
 	}
 
@@ -597,11 +649,21 @@ class ReaderTtsMediaService : Service(), TextToSpeech.OnInitListener {
 	}
 
 	private fun rebuildTtsEngineForRecovery(reason: String) {
+		if (isRebuildingEngine) {
+			Log.w(TAG, "Rebuild already in progress, skipping: $reason")
+			return
+		}
 		Log.w(TAG, "Rebuilding TextToSpeech engine for recovery: $reason")
+		isRebuildingEngine = true
 		pendingReplayAfterInit = true
 		isTtsReady = false
+		clearScheduledRecoveries()
+		// Increment session so callbacks from the dying engine are ignored
+		sessionGeneration += 1
+		clearUtteranceRuntimeState()
 		tts?.stop()
 		tts?.shutdown()
+		tts = null
 		setupTextToSpeech()
 	}
 
@@ -640,7 +702,7 @@ class ReaderTtsMediaService : Service(), TextToSpeech.OnInitListener {
 		}
 
 		if (!isTtsReady) {
-			if (!pendingReplayAfterInit) {
+			if (!pendingReplayAfterInit && !isRebuildingEngine) {
 				rebuildTtsEngineForRecovery("tts_not_ready")
 			}
 			return
@@ -691,11 +753,12 @@ class ReaderTtsMediaService : Service(), TextToSpeech.OnInitListener {
 							.setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
 							.build(),
 					)
-					.setAcceptsDelayedFocusGain(false)
+					.setAcceptsDelayedFocusGain(true)
 					.setOnAudioFocusChangeListener(audioFocusListener)
 					.build()
 					.also { audioFocusRequest = it }
-			audioManager.requestAudioFocus(request) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+			val result = audioManager.requestAudioFocus(request)
+			result == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
 		} else {
 			@Suppress("DEPRECATION")
 			audioManager.requestAudioFocus(
@@ -704,6 +767,61 @@ class ReaderTtsMediaService : Service(), TextToSpeech.OnInitListener {
 				AudioManager.AUDIOFOCUS_GAIN,
 			) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
 		}
+	}
+
+	private fun scheduleEngineRebuild(reason: String) {
+		if (isRebuildingEngine) return
+		pendingEngineRebuild?.let(mainHandler::removeCallbacks)
+		engineRebuildAttempt += 1
+		val delayMs = min(30_000L, 1_000L * engineRebuildAttempt * engineRebuildAttempt)
+		pendingEngineRebuild = Runnable {
+			if (status == "idle") return@Runnable
+			if (segments.isEmpty()) return@Runnable
+			rebuildTtsEngineForRecovery(reason)
+		}.also { mainHandler.postDelayed(it, delayMs) }
+	}
+
+	private fun scheduleAudioFocusRetry() {
+		pendingAudioFocusRetry?.let(mainHandler::removeCallbacks)
+		audioFocusRetryAttempt += 1
+		val delayMs = min(6_000L, 1_000L + (audioFocusRetryAttempt * 500L))
+		pendingAudioFocusRetry = Runnable {
+			if (status == "idle") return@Runnable
+			if (!pausedByAudioFocus) return@Runnable
+			if (requestAudioFocus()) {
+				pausedByAudioFocus = false
+				audioFocusRetryAttempt = 0
+				handleResume()
+				return@Runnable
+			}
+			scheduleAudioFocusRetry()
+		}.also { mainHandler.postDelayed(it, delayMs) }
+	}
+
+	private fun clearAudioFocusRetry() {
+		pendingAudioFocusRetry?.let(mainHandler::removeCallbacks)
+		pendingAudioFocusRetry = null
+		audioFocusRetryAttempt = 0
+	}
+
+	private fun clearScheduledRecoveries() {
+		pendingEngineRebuild?.let(mainHandler::removeCallbacks)
+		pendingEngineRebuild = null
+		clearAudioFocusRetry()
+	}
+
+	private fun scheduleIdleStop() {
+		pendingIdleStop?.let(mainHandler::removeCallbacks)
+		pendingIdleStop = Runnable {
+			if (status != "idle") return@Runnable
+			Log.i(TAG, "idle_timeout_stop")
+			stopSelf()
+		}.also { mainHandler.postDelayed(it, 30_000L) }
+	}
+
+	private fun cancelIdleStop() {
+		pendingIdleStop?.let(mainHandler::removeCallbacks)
+		pendingIdleStop = null
 	}
 
 	private fun abandonAudioFocus() {
@@ -778,6 +896,7 @@ class ReaderTtsMediaService : Service(), TextToSpeech.OnInitListener {
 				this.action = action
 				if (action == ACTION_STOP) {
 					putExtra(EXTRA_CLEAR_CONTENT_KEY, true)
+					putExtra(EXTRA_STOP_REASON, STOP_REASON_USER)
 				}
 			},
 			PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
@@ -790,9 +909,8 @@ class ReaderTtsMediaService : Service(), TextToSpeech.OnInitListener {
 		.setContentTitle(title ?: appLabel())
 		.setContentText(currentProgressLabel())
 		.setContentIntent(buildLaunchIntent())
-		.setDeleteIntent(buildServicePendingIntent(ACTION_STOP))
 		.setOnlyAlertOnce(true)
-		.setOngoing(status == "playing")
+		.setOngoing(status == "playing" || status == "paused")
 		.setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
 		.setCategory(NotificationCompat.CATEGORY_TRANSPORT)
 		.addAction(
@@ -828,7 +946,7 @@ class ReaderTtsMediaService : Service(), TextToSpeech.OnInitListener {
 			object : MediaSessionCompat.Callback() {
 				override fun onPlay() = handleResume()
 				override fun onPause() = handlePause()
-				override fun onStop() = handleStop(clearContentKey = true)
+				override fun onStop() = handleStop(clearContentKey = true, reason = STOP_REASON_USER)
 				override fun onSkipToNext() = handleSkip(1)
 				override fun onSkipToPrevious() = handleSkip(-1)
 			},
@@ -873,11 +991,18 @@ class ReaderTtsMediaService : Service(), TextToSpeech.OnInitListener {
 				isForegroundActive = false
 			}
 			notificationManager.cancel(NOTIFICATION_ID)
+			// Even without background mode, keep foreground service alive while playing
+			// to prevent Android from killing us.
+			if (status == "playing" || status == "paused") {
+				val notification = buildNotification()
+				startForeground(NOTIFICATION_ID, notification)
+				isForegroundActive = true
+			}
 			return
 		}
 
 		when (status) {
-			"playing" -> {
+			"playing", "paused" -> {
 				val notification = buildNotification()
 				if (!isForegroundActive) {
 					startForeground(NOTIFICATION_ID, notification)
@@ -885,14 +1010,6 @@ class ReaderTtsMediaService : Service(), TextToSpeech.OnInitListener {
 				} else {
 					notificationManager.notify(NOTIFICATION_ID, notification)
 				}
-			}
-			"paused" -> {
-				val notification = buildNotification()
-				if (isForegroundActive) {
-					stopForeground(false)
-					isForegroundActive = false
-				}
-				notificationManager.notify(NOTIFICATION_ID, notification)
 			}
 			else -> {
 				if (isForegroundActive) {
@@ -964,6 +1081,9 @@ class ReaderTtsMediaService : Service(), TextToSpeech.OnInitListener {
 
 	override fun onDestroy() {
 		mainHandler.removeCallbacks(playbackHealthRunnable)
+		isRebuildingEngine = false
+		clearScheduledRecoveries()
+		cancelIdleStop()
 		status = "idle"
 		currentIndex = 0
 		segments = emptyList()

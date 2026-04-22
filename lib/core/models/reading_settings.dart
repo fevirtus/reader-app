@@ -5,9 +5,11 @@ class ReadingSettings {
     this.letterSpacing = 0,
     this.fontFamily = 'serif',
     this.themePreset = 'paper',
+    this.backgroundColorValue = 0xFFFFFEF8,
+    this.textColorValue = 0xFF111111,
     this.horizontalPadding = 20,
     this.paragraphSpacing = 24,
-    this.textAlign = 'justify',
+    this.textAlign = 'left',
   });
 
   final double fontSize;
@@ -15,6 +17,8 @@ class ReadingSettings {
   final double letterSpacing;
   final String fontFamily;
   final String themePreset;
+  final int backgroundColorValue;
+  final int textColorValue;
   final double horizontalPadding;
   final double paragraphSpacing;
   final String textAlign;
@@ -25,6 +29,8 @@ class ReadingSettings {
     double? letterSpacing,
     String? fontFamily,
     String? themePreset,
+    int? backgroundColorValue,
+    int? textColorValue,
     double? horizontalPadding,
     double? paragraphSpacing,
     String? textAlign,
@@ -35,6 +41,8 @@ class ReadingSettings {
         letterSpacing: letterSpacing ?? this.letterSpacing,
         fontFamily: fontFamily ?? this.fontFamily,
         themePreset: themePreset ?? this.themePreset,
+        backgroundColorValue: backgroundColorValue ?? this.backgroundColorValue,
+        textColorValue: textColorValue ?? this.textColorValue,
         horizontalPadding: horizontalPadding ?? this.horizontalPadding,
         paragraphSpacing: paragraphSpacing ?? this.paragraphSpacing,
         textAlign: textAlign ?? this.textAlign,
@@ -46,9 +54,12 @@ class ReadingSettings {
         letterSpacing: (json['letterSpacing'] as num?)?.toDouble() ?? 0,
         fontFamily: json['fontFamily'] as String? ?? 'serif',
         themePreset: json['themePreset'] as String? ?? 'paper',
+        backgroundColorValue:
+            (json['backgroundColorValue'] as num?)?.toInt() ?? 0xFFFFFEF8,
+        textColorValue: (json['textColorValue'] as num?)?.toInt() ?? 0xFF111111,
         horizontalPadding: (json['horizontalPadding'] as num?)?.toDouble() ?? 20,
         paragraphSpacing: (json['paragraphSpacing'] as num?)?.toDouble() ?? 24,
-        textAlign: json['textAlign'] as String? ?? 'justify',
+        textAlign: json['textAlign'] as String? ?? 'left',
       );
 
   Map<String, dynamic> toJson() => {
@@ -57,6 +68,8 @@ class ReadingSettings {
         'letterSpacing': letterSpacing,
         'fontFamily': fontFamily,
         'themePreset': themePreset,
+        'backgroundColorValue': backgroundColorValue,
+        'textColorValue': textColorValue,
         'horizontalPadding': horizontalPadding,
         'paragraphSpacing': paragraphSpacing,
         'textAlign': textAlign,

@@ -8,6 +8,8 @@ class LocalStore {
   static const _kLetterSpacing = 'reader_letter_spacing';
   static const _kFontFamily = 'reader_font_family';
   static const _kThemePreset = 'reader_theme_preset';
+  static const _kBackgroundColor = 'reader_background_color';
+  static const _kTextColor = 'reader_text_color';
   static const _kHorizontalPadding = 'reader_horizontal_padding';
   static const _kParagraphSpacing = 'reader_paragraph_spacing';
   static const _kTextAlign = 'reader_text_align';
@@ -24,6 +26,8 @@ class LocalStore {
     await prefs.setDouble(_kLetterSpacing, settings.letterSpacing);
     await prefs.setString(_kFontFamily, settings.fontFamily);
     await prefs.setString(_kThemePreset, settings.themePreset);
+    await prefs.setInt(_kBackgroundColor, settings.backgroundColorValue);
+    await prefs.setInt(_kTextColor, settings.textColorValue);
     await prefs.setDouble(_kHorizontalPadding, settings.horizontalPadding);
     await prefs.setDouble(_kParagraphSpacing, settings.paragraphSpacing);
     await prefs.setString(_kTextAlign, settings.textAlign);
@@ -32,15 +36,29 @@ class LocalStore {
   Future<ReadingSettings?> loadReadingSettings() async {
     final prefs = await SharedPreferences.getInstance();
     if (!prefs.containsKey(_kFontSize)) return null;
+    final themePreset = prefs.getString(_kThemePreset) ?? 'paper';
+    final fallbackBackground = switch (themePreset) {
+      'night' => 0xFF101418,
+      'sepia' => 0xFFF6EAD7,
+      _ => 0xFFFFFEF8,
+    };
+    final fallbackText = switch (themePreset) {
+      'night' => 0xFFE6EAF2,
+      'sepia' => 0xFF3B2F23,
+      _ => 0xFF111111,
+    };
+
     return ReadingSettings(
       fontSize: prefs.getDouble(_kFontSize) ?? 18,
       lineHeight: prefs.getDouble(_kLineHeight) ?? 1.8,
       letterSpacing: prefs.getDouble(_kLetterSpacing) ?? 0,
       fontFamily: prefs.getString(_kFontFamily) ?? 'serif',
-      themePreset: prefs.getString(_kThemePreset) ?? 'paper',
+      themePreset: themePreset,
+      backgroundColorValue: prefs.getInt(_kBackgroundColor) ?? fallbackBackground,
+      textColorValue: prefs.getInt(_kTextColor) ?? fallbackText,
       horizontalPadding: prefs.getDouble(_kHorizontalPadding) ?? 20,
       paragraphSpacing: prefs.getDouble(_kParagraphSpacing) ?? 24,
-      textAlign: prefs.getString(_kTextAlign) ?? 'justify',
+      textAlign: prefs.getString(_kTextAlign) ?? 'left',
     );
   }
 

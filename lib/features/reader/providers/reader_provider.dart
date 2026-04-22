@@ -103,14 +103,20 @@ class ReaderNotifier extends StateNotifier<ReadingProgress?> {
     } catch (_) {}
   }
 
-  DateTime? _lastUpdate;
-  Future<void> _debounceUpdate(double offset) async {
-    final now = DateTime.now();
-    if (_lastUpdate != null && now.difference(_lastUpdate!).inSeconds < 3) return;
-    _lastUpdate = now;
-    if (state != null) {
-      await _persistProgress(state!.chapterId, state!.chapterNumber, offset);
-    }
+  Timer? _debounceTimer;
+  void _debounceUpdate(double offset) {
+    _debounceTimer?.cancel();
+    _debounceTimer = Timer(const Duration(seconds: 3), () {
+      if (state != null) {
+        unawaited(_persistProgress(state!.chapterId, state!.chapterNumber, offset));
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _debounceTimer?.cancel();
+    super.dispose();
   }
 }
 

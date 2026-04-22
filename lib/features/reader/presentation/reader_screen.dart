@@ -26,6 +26,22 @@ class ReaderScreen extends ConsumerStatefulWidget {
 }
 
 class _ReaderScreenState extends ConsumerState<ReaderScreen> {
+  static const List<Color> _backgroundColorChoices = [
+    Color(0xFFFFFEF8),
+    Color(0xFFF6EAD7),
+    Color(0xFF101418),
+    Color(0xFFF3F7FF),
+    Color(0xFFF6FFF5),
+  ];
+
+  static const List<Color> _textColorChoices = [
+    Color(0xFF111111),
+    Color(0xFF2C1E12),
+    Color(0xFFE6EAF2),
+    Color(0xFF1F2A44),
+    Color(0xFF0F5132),
+  ];
+
   final ScrollController _scrollCtrl = ScrollController();
   Timer? _uiAutoHideTimer;
   final ValueNotifier<double> _readingProgress = ValueNotifier(0);
@@ -67,7 +83,7 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
       case 'center':
         return TextAlign.center;
       default:
-        return TextAlign.justify;
+        return TextAlign.left;
     }
   }
 
@@ -374,23 +390,6 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
     });
   }
 
-  void _handleHorizontalSwipeEnd(DragEndDetails details, ChapterModel chapter) {
-    final velocity = details.primaryVelocity ?? 0;
-    const minVelocity = 300.0;
-
-    if (velocity.abs() < minVelocity) return;
-
-    // Swipe right -> previous chapter; swipe left -> next chapter
-    if (velocity > 0 && chapter.prevChapterId != null) {
-      _goToPreviousChapter(chapter);
-      return;
-    }
-
-    if (velocity < 0 && chapter.nextChapterId != null) {
-      _goToNextChapter(chapter);
-    }
-  }
-
   void _goToPreviousChapter(ChapterModel chapter) {
     final prevId = chapter.prevChapterId;
     if (prevId == null) return;
@@ -555,6 +554,9 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
             final settings = ref.watch(readingSettingsProvider);
             final tts = ref.watch(ttsProvider);
             final ttsNotifier = ref.read(ttsProvider.notifier);
+            final theme = Theme.of(context);
+            final colorScheme = theme.colorScheme;
+            final isCompactTabs = MediaQuery.sizeOf(context).width < 380;
 
             void closeSettingsSheet() {
               if (!sheetContext.mounted) return;
@@ -590,11 +592,6 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   Text('Tùy chỉnh đọc', style: Theme.of(context).textTheme.headlineSmall),
-                                  const SizedBox(height: 4),
-                                  Text(
-                                    'Tùy chỉnh văn bản, giao diện, bố cục và TTS ngay trong chương',
-                                    style: Theme.of(context).textTheme.bodySmall,
-                                  ),
                                 ],
                               ),
                             ),
@@ -617,23 +614,65 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
                             children: [
                               Padding(
                                 padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-                                child: TabBar(
-                                  isScrollable: true,
-                                  tabAlignment: TabAlignment.start,
-                                  dividerColor: Colors.transparent,
-                                  labelPadding: const EdgeInsets.only(right: 8),
-                                  indicator: BoxDecoration(
-                                    color: Theme.of(context).colorScheme.secondaryContainer,
-                                    borderRadius: BorderRadius.circular(999),
+                                child: Container(
+                                  height: 52,
+                                  padding: const EdgeInsets.all(4),
+                                  decoration: BoxDecoration(
+                                    color: colorScheme.surfaceContainerHighest.withAlpha(180),
+                                    borderRadius: BorderRadius.circular(24),
+                                    border: Border.all(
+                                      color: colorScheme.outlineVariant.withAlpha(160),
+                                    ),
                                   ),
-                                  labelColor: Theme.of(context).colorScheme.onSecondaryContainer,
-                                  unselectedLabelColor: Theme.of(context).colorScheme.onSurfaceVariant,
-                                  tabs: const [
-                                    Tab(child: _TabLabel(icon: Icons.text_fields, label: 'Văn bản')),
-                                    Tab(child: _TabLabel(icon: Icons.palette_outlined, label: 'Giao diện')),
-                                    Tab(child: _TabLabel(icon: Icons.view_day_outlined, label: 'Bố cục')),
-                                    Tab(child: _TabLabel(icon: Icons.record_voice_over_outlined, label: 'TTS')),
-                                  ],
+                                  child: TabBar(
+                                    isScrollable: false,
+                                    dividerColor: Colors.transparent,
+                                    padding: EdgeInsets.zero,
+                                    labelPadding: EdgeInsets.zero,
+                                    indicatorSize: TabBarIndicatorSize.tab,
+                                    splashBorderRadius: BorderRadius.circular(18),
+                                    overlayColor: WidgetStateProperty.resolveWith((states) {
+                                      if (states.contains(WidgetState.pressed)) {
+                                        return colorScheme.primary.withAlpha(18);
+                                      }
+                                      return null;
+                                    }),
+                                    indicator: BoxDecoration(
+                                      color: colorScheme.surface,
+                                      borderRadius: BorderRadius.circular(18),
+                                      boxShadow: [
+                                        BoxShadow(
+                                          color: Colors.black.withAlpha(16),
+                                          blurRadius: 10,
+                                          offset: const Offset(0, 2),
+                                        ),
+                                      ],
+                                    ),
+                                    labelColor: colorScheme.onSurface,
+                                    unselectedLabelColor: colorScheme.onSurfaceVariant,
+                                    tabs: [
+                                      _TabLabel(
+                                        icon: Icons.text_fields_rounded,
+                                        label: 'Văn bản',
+                                        compact: isCompactTabs,
+                                      ),
+                                      _TabLabel(
+                                        icon: Icons.palette_outlined,
+                                        label: 'Giao diện',
+                                        compact: isCompactTabs,
+                                      ),
+                                      _TabLabel(
+                                        icon: Icons.tune_rounded,
+                                        label: 'Bố cục',
+                                        compact: isCompactTabs,
+                                      ),
+                                      _TabLabel(
+                                        icon: Icons.record_voice_over_outlined,
+                                        label: 'TTS',
+                                        compact: isCompactTabs,
+                                      ),
+                                    ],
+                                  ),
                                 ),
                               ),
                               Expanded(
@@ -656,8 +695,14 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
                                                   ButtonSegment(value: 'sans', label: Text('Không chân')),
                                                   ButtonSegment(value: 'mono', label: Text('Đơn cách')),
                                                 ],
-                                                selected: {settings.fontFamily},
-                                                onSelectionChanged: (s) => update(settings.copyWith(fontFamily: s.first)),
+                                                selected: {
+                                                  {'serif', 'sans', 'mono'}.contains(settings.fontFamily)
+                                                      ? settings.fontFamily
+                                                      : 'serif',
+                                                },
+                                                onSelectionChanged: (s) => update(
+                                                  settings.copyWith(fontFamily: s.first),
+                                                ),
                                               ),
                                               const SizedBox(height: 12),
                                               _LabeledSlider(
@@ -700,62 +745,45 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
                                       children: [
                                         _SettingsSection(
                                           title: 'Giao diện đọc',
-                                          child: Wrap(
-                                            spacing: 12,
-                                            runSpacing: 12,
+                                          child: Column(
+                                            crossAxisAlignment: CrossAxisAlignment.start,
                                             children: [
-                                              _PresetChip(
-                                                label: 'Sáng',
-                                                value: 'paper',
-                                                selected: settings.themePreset == 'paper',
-                                                onTap: () => update(settings.copyWith(themePreset: 'paper')),
+                                              Text(
+                                                'Màu nền',
+                                                style: Theme.of(context).textTheme.labelLarge,
                                               ),
-                                              _PresetChip(
-                                                label: 'Sepia',
-                                                value: 'sepia',
-                                                selected: settings.themePreset == 'sepia',
-                                                onTap: () => update(settings.copyWith(themePreset: 'sepia')),
+                                              const SizedBox(height: 8),
+                                              Wrap(
+                                                spacing: 10,
+                                                runSpacing: 10,
+                                                children: _backgroundColorChoices.map((color) {
+                                                  return _ColorOptionChip(
+                                                    color: color,
+                                                    selected: settings.backgroundColorValue == color.value,
+                                                    onTap: () => update(
+                                                      settings.copyWith(backgroundColorValue: color.value),
+                                                    ),
+                                                  );
+                                                }).toList(),
                                               ),
-                                              _PresetChip(
-                                                label: 'Ban đêm',
-                                                value: 'night',
-                                                selected: settings.themePreset == 'night',
-                                                onTap: () => update(settings.copyWith(themePreset: 'night')),
+                                              const SizedBox(height: 14),
+                                              Text(
+                                                'Màu chữ',
+                                                style: Theme.of(context).textTheme.labelLarge,
                                               ),
-                                            ],
-                                          ),
-                                        ),
-                                        _SettingsSection(
-                                          title: 'Mẫu nhanh',
-                                          child: Wrap(
-                                            spacing: 8,
-                                            runSpacing: 8,
-                                            children: [
-                                              FilledButton.tonal(
-                                                onPressed: () => update(const ReadingSettings()),
-                                                child: const Text('Mặc định'),
-                                              ),
-                                              FilledButton.tonal(
-                                                onPressed: () => update(
-                                                  settings.copyWith(
-                                                    themePreset: 'night',
-                                                    fontSize: 19,
-                                                    lineHeight: 1.9,
-                                                    textAlign: 'justify',
-                                                  ),
-                                                ),
-                                                child: const Text('Đọc đêm'),
-                                              ),
-                                              FilledButton.tonal(
-                                                onPressed: () => update(
-                                                  settings.copyWith(
-                                                    themePreset: 'sepia',
-                                                    fontSize: 18,
-                                                    lineHeight: 1.8,
-                                                    textAlign: 'justify',
-                                                  ),
-                                                ),
-                                                child: const Text('Thư giãn'),
+                                              const SizedBox(height: 8),
+                                              Wrap(
+                                                spacing: 10,
+                                                runSpacing: 10,
+                                                children: _textColorChoices.map((color) {
+                                                  return _ColorOptionChip(
+                                                    color: color,
+                                                    selected: settings.textColorValue == color.value,
+                                                    onTap: () => update(
+                                                      settings.copyWith(textColorValue: color.value),
+                                                    ),
+                                                  );
+                                                }).toList(),
                                               ),
                                             ],
                                           ),
@@ -854,32 +882,84 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
                                                 }).toList(),
                                               ),
                                               const SizedBox(height: 12),
-                                              SwitchListTile.adaptive(
-                                                contentPadding: EdgeInsets.zero,
-                                                title: const Text('Chạy nền cho TTS'),
-                                                subtitle: const Text(
-                                                  'Tiếp tục đọc khi chuyển app hoặc tắt màn hình (Android)',
-                                                ),
-                                                value: tts.backgroundModeEnabled,
-                                                onChanged: ttsNotifier.setBackgroundModeEnabled,
-                                              ),
-                                              if (tts.backgroundModeEnabled)
-                                                ListTile(
-                                                  contentPadding: EdgeInsets.zero,
-                                                  title: const Text('Loại trừ tối ưu pin'),
-                                                  subtitle: Text(
-                                                    tts.batteryOptimizationIgnored
-                                                        ? 'Đã bật: Android sẽ ít khả năng dừng TTS khi chạy nền.'
-                                                        : 'Nên bật để Android không chặn TTS khi tắt màn hình.',
+                                              Container(
+                                                width: double.infinity,
+                                                padding: const EdgeInsets.all(12),
+                                                decoration: BoxDecoration(
+                                                  color: Theme.of(context)
+                                                      .colorScheme
+                                                      .secondaryContainer
+                                                      .withAlpha(90),
+                                                  borderRadius: BorderRadius.circular(12),
+                                                  border: Border.all(
+                                                    color: Theme.of(context).colorScheme.outlineVariant,
                                                   ),
-                                                  trailing: tts.batteryOptimizationIgnored
-                                                      ? const Icon(Icons.verified, color: Colors.green)
-                                                      : OutlinedButton(
-                                                          onPressed: ttsNotifier
-                                                              .ensureBatteryOptimizationIgnored,
-                                                          child: const Text('Bật ngay'),
-                                                        ),
                                                 ),
+                                                child: Column(
+                                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                                  children: [
+                                                    Text(
+                                                      'Điều kiện bắt buộc để TTS chạy ổn định',
+                                                      style: Theme.of(context).textTheme.titleSmall,
+                                                    ),
+                                                    const SizedBox(height: 8),
+                                                    Row(
+                                                      children: [
+                                                        Icon(
+                                                          tts.backgroundModeEnabled
+                                                              ? Icons.check_circle
+                                                              : Icons.radio_button_unchecked,
+                                                          size: 18,
+                                                          color: tts.backgroundModeEnabled
+                                                              ? Colors.green
+                                                              : Theme.of(context)
+                                                                  .colorScheme
+                                                                  .onSurfaceVariant,
+                                                        ),
+                                                        const SizedBox(width: 8),
+                                                        const Expanded(
+                                                          child: Text(
+                                                            'Bật chạy nền cho TTS',
+                                                          ),
+                                                        ),
+                                                      ],
+                                                    ),
+                                                    const SizedBox(height: 6),
+                                                    Row(
+                                                      children: [
+                                                        Icon(
+                                                          tts.batteryOptimizationIgnored
+                                                              ? Icons.check_circle
+                                                              : Icons.radio_button_unchecked,
+                                                          size: 18,
+                                                          color: tts.batteryOptimizationIgnored
+                                                              ? Colors.green
+                                                              : Theme.of(context)
+                                                                  .colorScheme
+                                                                  .onSurfaceVariant,
+                                                        ),
+                                                        const SizedBox(width: 8),
+                                                        const Expanded(
+                                                          child: Text(
+                                                            'Loại trừ tối ưu pin',
+                                                          ),
+                                                        ),
+                                                      ],
+                                                    ),
+                                                    const SizedBox(height: 10),
+                                                    Align(
+                                                      alignment: Alignment.centerRight,
+                                                      child: OutlinedButton(
+                                                        onPressed: () async {
+                                                          await ttsNotifier.setBackgroundModeEnabled(true);
+                                                          await ttsNotifier.ensureBatteryOptimizationIgnored();
+                                                        },
+                                                        child: const Text('Bật ngay'),
+                                                      ),
+                                                    ),
+                                                  ],
+                                                ),
+                                              ),
                                               const SizedBox(height: 12),
                                               if (tts.availableVietnameseVoices.isNotEmpty)
                                                 DropdownButtonFormField<String>(
@@ -951,24 +1031,9 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
 
     // Side-effects for TTS state changes (navigation, auto-start).
     ref.listen<TtsState>(ttsProvider, _onTtsStateChanged);
-    Color readerBackground;
-    Color readerTextColor;
-    Color readerMutedColor;
-
-    switch (settings.themePreset) {
-      case 'night':
-        readerBackground = const Color(0xFF101418);
-        readerTextColor = const Color(0xFFE6EAF2);
-        readerMutedColor = const Color(0xFFA5B0C5);
-      case 'sepia':
-        readerBackground = const Color(0xFFF6EAD7);
-        readerTextColor = const Color(0xFF3B2F23);
-        readerMutedColor = const Color(0xFF7A6753);
-      default:
-        readerBackground = const Color(0xFFFFFEF8);
-        readerTextColor = const Color(0xFF111111);
-        readerMutedColor = const Color(0xFF555555);
-    }
+    final readerBackground = Color(settings.backgroundColorValue);
+    final readerTextColor = Color(settings.textColorValue);
+    final readerMutedColor = readerTextColor.withAlpha(170);
 
     return Scaffold(
       body: chapterAsync.when(
@@ -1002,11 +1067,7 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
             fontSize: settings.fontSize,
             height: settings.lineHeight,
             letterSpacing: settings.letterSpacing,
-            fontFamily: settings.fontFamily == 'serif'
-                ? 'Georgia'
-                : settings.fontFamily == 'mono'
-                    ? 'Courier'
-                    : null,
+            fontFamily: _resolveReaderFontFamily(settings.fontFamily),
           );
           final paragraphHighlightStyle = paragraphStyle.copyWith(
             backgroundColor: Theme.of(context).colorScheme.primary.withAlpha(80),
@@ -1019,13 +1080,9 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
             _initializeChapterSession(chapter);
           });
 
-          return GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onHorizontalDragEnd: (details) =>
-                _handleHorizontalSwipeEnd(details, chapter),
-            child: ColoredBox(
-              color: readerBackground,
-              child: Column(
+          return ColoredBox(
+            color: readerBackground,
+            child: Column(
                 children: [
                   ValueListenableBuilder<double>(
                     valueListenable: _readingProgress,
@@ -1202,7 +1259,6 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
                   ),
                 ],
               ),
-            ),
           );
         },
       ),
@@ -1360,25 +1416,18 @@ class _TopBar extends StatelessWidget {
   }
 }
 
-Color _surfaceForPreset(String preset) {
-  switch (preset) {
-    case 'night':
-      return const Color(0xFF101418);
-    case 'sepia':
-      return const Color(0xFFF6EAD7);
+String? _resolveReaderFontFamily(String fontFamily) {
+  switch (fontFamily) {
+    case 'serif':
+    case 'georgia':
+      return 'Georgia';
+    case 'mono':
+      return 'Courier';
+    case 'roboto':
+      return 'Roboto';
+    case 'sans':
     default:
-      return const Color(0xFFFFFEF8);
-  }
-}
-
-Color _textForPreset(String preset) {
-  switch (preset) {
-    case 'night':
-      return const Color(0xFFE6EAF2);
-    case 'sepia':
-      return const Color(0xFF3B2F23);
-    default:
-      return const Color(0xFF111111);
+      return null;
   }
 }
 
@@ -1455,16 +1504,14 @@ class _LabeledSlider extends StatelessWidget {
   }
 }
 
-class _PresetChip extends StatelessWidget {
-  const _PresetChip({
-    required this.label,
-    required this.value,
+class _ColorOptionChip extends StatelessWidget {
+  const _ColorOptionChip({
+    required this.color,
     required this.selected,
     required this.onTap,
   });
 
-  final String label;
-  final String value;
+  final Color color;
   final bool selected;
   final VoidCallback onTap;
 
@@ -1472,59 +1519,29 @@ class _PresetChip extends StatelessWidget {
   Widget build(BuildContext context) {
     return InkWell(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(18),
-      child: Container(
-        width: 132,
-        padding: const EdgeInsets.all(12),
+      borderRadius: BorderRadius.circular(999),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 160),
+        width: 34,
+        height: 34,
         decoration: BoxDecoration(
-          color: _surfaceForPreset(value),
-          borderRadius: BorderRadius.circular(18),
+          shape: BoxShape.circle,
+          color: color,
           border: Border.all(
             color: selected
                 ? Theme.of(context).colorScheme.primary
                 : Theme.of(context).colorScheme.outlineVariant,
-            width: selected ? 2 : 1,
+            width: selected ? 3 : 1,
           ),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Container(
-              height: 60,
-              decoration: BoxDecoration(
-                color: _surfaceForPreset(value),
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: _textForPreset(value).withAlpha(40)),
-              ),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Aa',
-                      style: TextStyle(
-                        color: _textForPreset(value),
-                        fontWeight: FontWeight.w700,
-                        fontSize: 18,
-                      ),
-                    ),
-                    const Spacer(),
-                    Container(
-                      height: 3,
-                      width: 54,
-                      decoration: BoxDecoration(
-                        color: _textForPreset(value).withAlpha(110),
-                        borderRadius: BorderRadius.circular(99),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            const SizedBox(height: 8),
-            Text(label, style: Theme.of(context).textTheme.labelLarge),
-          ],
+          boxShadow: selected
+              ? [
+                  BoxShadow(
+                    color: Theme.of(context).colorScheme.primary.withAlpha(60),
+                    blurRadius: 8,
+                    spreadRadius: 1,
+                  ),
+                ]
+              : null,
         ),
       ),
     );
@@ -1532,20 +1549,50 @@ class _PresetChip extends StatelessWidget {
 }
 
 class _TabLabel extends StatelessWidget {
-  const _TabLabel({required this.icon, required this.label});
+  const _TabLabel({
+    required this.icon,
+    required this.label,
+    this.compact = false,
+  });
 
   final IconData icon;
   final String label;
+  final bool compact;
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Icon(icon, size: 16),
-        const SizedBox(width: 6),
-        Text(label),
-      ],
+    final textStyle = Theme.of(context).textTheme.labelLarge?.copyWith(
+          fontSize: compact ? 12.5 : 13.5,
+          fontWeight: FontWeight.w600,
+          letterSpacing: -0.1,
+        );
+
+    return SizedBox(
+      height: double.infinity,
+      child: Center(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 6),
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (!compact) ...[
+                  Icon(icon, size: 16),
+                  const SizedBox(width: 6),
+                ],
+                Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.fade,
+                  softWrap: false,
+                  style: textStyle,
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

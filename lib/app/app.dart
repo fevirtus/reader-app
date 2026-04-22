@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/auth/session_expiry_notifier.dart';
 import '../core/theme/app_theme.dart';
 import '../features/auth/providers/auth_provider.dart';
+import '../features/reader/tts/tts_service.dart';
 import 'router/route_names.dart';
 import 'router/app_router.dart';
 
@@ -21,6 +23,10 @@ class _ReaderAppState extends ConsumerState<ReaderApp> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _ensureMandatoryTtsRequirements();
+    });
+
     _sessionExpirySub = ref.listenManual<int>(
       sessionExpiryProvider,
       (previous, next) async {
@@ -43,6 +49,45 @@ class _ReaderAppState extends ConsumerState<ReaderApp> {
           );
       },
     );
+  }
+
+  Future<void> _ensureMandatoryTtsRequirements() async {
+    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android || !mounted) {
+      return;
+    }
+
+    final notifier = ref.read(ttsProvider.notifier);
+    await notifier.setBackgroundModeEnabled(true);
+    await notifier.ensureBatteryOptimizationIgnored();
+    if (!mounted) return;
+
+    while (mounted && !ref.read(ttsProvider).batteryOptimizationIgnored) {
+      await showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) {
+          return AlertDialog(
+            title: const Text('Yeu cau bat buoc cho TTS'),
+            content: const Text(
+              'Can bat Chay nen va Loai tru toi uu pin de TTS khong bi ngat dot ngot.',
+            ),
+            actions: [
+              FilledButton(
+                onPressed: () async {
+                  await notifier.setBackgroundModeEnabled(true);
+                  await notifier.ensureBatteryOptimizationIgnored();
+                  if (!context.mounted) return;
+                  if (ref.read(ttsProvider).batteryOptimizationIgnored) {
+                    Navigator.of(context).pop();
+                  }
+                },
+                child: const Text('Bat ngay'),
+              ),
+            ],
+          );
+        },
+      );
+    }
   }
 
   @override
