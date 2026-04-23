@@ -155,6 +155,7 @@ class TtsNotifier extends StateNotifier<TtsState> {
   int _pendingFallbackIndex = -1;
   bool _didStartCurrentFallbackUtterance = false;
   bool _hasPromptedNotificationSettings = false;
+  bool _androidFallbackReady = false;
 
   bool get _useNativeAndroidMediaService => Platform.isAndroid;
 
@@ -315,6 +316,73 @@ class TtsNotifier extends StateNotifier<TtsState> {
     );
   }
 
+  Future<void> _ensureAndroidFallbackReady() async {
+    if (_androidFallbackReady) return;
+
+    await _tts.awaitSpeakCompletion(true);
+    await _tts.setSharedInstance(true);
+    await _configureVietnameseVoiceWithFlutterTts();
+    await _tts.setSpeechRate(state.speed);
+    await _tts.setVolume(1.0);
+    await _tts.setPitch(1.0);
+
+    _tts.setStartHandler(() {
+      _didStartCurrentFallbackUtterance = true;
+      final index = _pendingFallbackIndex;
+      if (index >= 0 && index < _segments.length) {
+        final segment = _segments[index];
+        state = state.copyWith(
+          status: TtsStatus.playing,
+          paragraphIndex: index,
+          activeParagraphIndex: segment.paragraphIndex,
+          progressStart: segment.start,
+          progressEnd: segment.end,
+        );
+      } else {
+        state = state.copyWith(status: TtsStatus.playing);
+      }
+    });
+
+    _tts.setCompletionHandler(() {
+      // Fallback playback progression is driven by _playFallbackFromGeneration.
+    });
+
+    _tts.setErrorHandler((_) {
+      if (_isInterruptingPlayback) return;
+      _pendingFallbackIndex = -1;
+      _didStartCurrentFallbackUtterance = false;
+      state = state.copyWith(
+        status: TtsStatus.idle,
+        activeParagraphIndex: -1,
+        progressStart: -1,
+        progressEnd: -1,
+      );
+    });
+
+    _androidFallbackReady = true;
+  }
+
+  Future<void> _startFallbackReading({
+    required int validIndex,
+    required _TtsSegment selectedSegment,
+    required String? contentKey,
+  }) async {
+    await _ensureAndroidFallbackReady();
+    final sessionId = await _interruptFallbackPlayback();
+
+    state = state.copyWith(
+      status: TtsStatus.playing,
+      paragraphIndex: validIndex,
+      totalParagraphs: _segments.length,
+      activeParagraphIndex: selectedSegment.paragraphIndex,
+      progressStart: selectedSegment.start,
+      progressEnd: selectedSegment.end,
+      contentKey: contentKey,
+    );
+
+    unawaited(_playFallbackFromGeneration(validIndex, sessionId));
+  }
+
   void _handleAndroidMediaEvent(dynamic event) {
     _applyAndroidSnapshot(event);
   }
@@ -372,6 +440,7 @@ class TtsNotifier extends StateNotifier<TtsState> {
 
     // Keep natural sentence flow while removing symbols that are usually read out noisily.
     final cleaned = raw
+        .replaceAll(RegExp(r'["“”]'), ' ')
         .replaceAll(RegExp(r'[_$#^*+=~`|<>\\\[\]{}]'), ' ')
         .replaceAll(RegExp(r'\s+'), ' ')
         .trim();
@@ -614,33 +683,32 @@ class TtsNotifier extends StateNotifier<TtsState> {
         contentKey: contentKey,
       );
 
-      await _mediaChannel.invokeMethod<void>('startReading', {
-        'contentKey': contentKey,
-        'title': title,
-        'startIndex': validIndex,
-        'speed': state.speed,
-        'language': state.language,
-        'voiceName': state.voiceName,
-        'backgroundModeEnabled': state.backgroundModeEnabled,
-        'segments': _segments.map((segment) => segment.toMap()).toList(),
-      });
+      try {
+        await _mediaChannel.invokeMethod<void>('startReading', {
+          'contentKey': contentKey,
+          'title': title,
+          'startIndex': validIndex,
+          'speed': state.speed,
+          'language': state.language,
+          'voiceName': state.voiceName,
+          'backgroundModeEnabled': state.backgroundModeEnabled,
+          'segments': _segments.map((segment) => segment.toMap()).toList(),
+        });
+      } on PlatformException {
+        await _startFallbackReading(
+          validIndex: validIndex,
+          selectedSegment: selectedSegment,
+          contentKey: contentKey,
+        );
+      }
       return;
     }
 
-    final sessionId = await _interruptFallbackPlayback();
-
-    state = state.copyWith(
-      status: TtsStatus.playing,
-      paragraphIndex: validIndex,
-      totalParagraphs: _segments.length,
-      activeParagraphIndex: -1,
-      progressStart: -1,
-      progressEnd: -1,
+    await _startFallbackReading(
+      validIndex: validIndex,
+      selectedSegment: selectedSegment,
       contentKey: contentKey,
     );
-    await _syncBackgroundMode();
-
-    unawaited(_playFallbackFromGeneration(validIndex, sessionId));
   }
 
   Future<int> _interruptFallbackPlayback() async {

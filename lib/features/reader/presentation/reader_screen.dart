@@ -179,7 +179,7 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
   }
 
   void _maybeAutoScrollToTtsParagraph(TtsState tts, int paragraphCount) {
-    if (tts.status == TtsStatus.idle) return;
+    if (tts.status != TtsStatus.playing) return;
     final index = tts.activeParagraphIndex;
     if (index < 0 || index >= paragraphCount) return;
     if (index == _lastAutoScrolledParagraph) return;
@@ -189,6 +189,8 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
       if (!mounted) return;
       final ctx = _paragraphKeys[index].currentContext;
       if (ctx == null) return;
+      // Clear any active text-selection focus before programmatic scrolling.
+      FocusManager.instance.primaryFocus?.unfocus();
       Scrollable.ensureVisible(
         ctx,
         alignment: 0.22,
@@ -455,11 +457,8 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
       builder: (sheetContext) {
         return Consumer(
           builder: (context, ref, _) {
-            final tocPage = ((currentChapter.number - 1) ~/ chapterPageSize) + 1;
             final chaptersAsync = ref.watch(
-              chapterListProvider(
-                ChapterListQuery(novelId: currentChapter.novelId, page: tocPage),
-              ),
+              chapterListProvider(currentChapter.novelId),
             );
             return FractionallySizedBox(
               heightFactor: 0.82,
@@ -489,12 +488,20 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
                       child: chaptersAsync.when(
                         loading: () => const Center(child: CircularProgressIndicator()),
                         error: (e, _) => Center(child: Text('Không tải được mục lục: $e')),
-                        data: (pageData) {
-                          final chapters = pageData.chapters;
+                        data: (chapters) {
                           if (chapters.isEmpty) {
                             return const Center(child: Text('Chưa có danh sách chương.'));
                           }
+                          // Find index of current chapter for auto-scroll
+                          final currentIndex = chapters.indexWhere((ch) => ch.id == currentChapter.id);
+                          final scrollController = ScrollController(
+                            initialScrollOffset: currentIndex > 0
+                                ? currentIndex * 48.0 // Approximate height per ListTile
+                                : 0,
+                          );
+                          
                           return ListView.separated(
+                            controller: scrollController,
                             itemCount: chapters.length,
                             separatorBuilder: (_, _) => const Divider(height: 1),
                             itemBuilder: (context, index) {
@@ -847,6 +854,22 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
                                           child: Column(
                                             crossAxisAlignment: CrossAxisAlignment.start,
                                             children: [
+                                              SwitchListTile.adaptive(
+                                                contentPadding: EdgeInsets.zero,
+                                                value: settings.enableSentenceTapTts,
+                                                onChanged: (enabled) {
+                                                  unawaited(
+                                                    ref
+                                                        .read(readingSettingsProvider.notifier)
+                                                        .setSentenceTapTtsEnabled(enabled),
+                                                  );
+                                                },
+                                                title: const Text('Bật chạm câu để phát TTS'),
+                                                subtitle: const Text(
+                                                  'Tắt để tránh chạm nhầm làm bắt đầu TTS.',
+                                                ),
+                                              ),
+                                              const SizedBox(height: 8),
                                               Row(
                                                 children: [
                                                   Expanded(
@@ -1166,6 +1189,12 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
                                                 .titleLarge
                                                 ?.copyWith(color: readerTextColor),
                                           ),
+                                          const SizedBox(height: 12),
+                                          _NavButtons(
+                                            chapter: chapter,
+                                            onGoPrevious: () => _goToPreviousChapter(chapter),
+                                            onGoNext: () => _goToNextChapter(chapter),
+                                          ),
                                           const SizedBox(height: 20),
                                           if (chapter.content.trim().isEmpty)
                                             Text(
@@ -1197,32 +1226,44 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
                                         alignment: Alignment.topCenter,
                                         child: ConstrainedBox(
                                           constraints: const BoxConstraints(maxWidth: 760),
-                                          child: Padding(
-                                            key: _paragraphKeys[index],
-                                            padding: EdgeInsets.only(
-                                              bottom: index == paragraphs.length - 1
-                                                  ? 0
-                                                  : settings.paragraphSpacing,
-                                            ),
-                                            child: _buildParagraphText(
-                                              context: context,
-                                              sentenceSlices: sentenceSlices,
-                                              textAlign: textAlign,
-                                              style: paragraphStyle,
-                                              highlightStyle: paragraphHighlightStyle,
-                                              isActiveParagraph: shouldHighlightTts &&
-                                                  tts.activeParagraphIndex == index,
-                                              highlightStart: tts.progressStart,
-                                              highlightEnd: tts.progressEnd,
-                                              onSentenceTap: (charOffset) {
-                                                ref.read(ttsProvider.notifier).startReading(
-                                                  chapter.content,
-                                                  contentKey: chapter.id,
-                                                  title: 'Chương ${chapter.number}: ${chapter.title}',
-                                                  startParagraphIndex: index,
-                                                  startCharOffset: charOffset,
-                                                );
-                                              },
+                                          child: SizedBox(
+                                            width: double.infinity,
+                                            child: Padding(
+                                              key: _paragraphKeys[index],
+                                              padding: EdgeInsets.only(
+                                                bottom: index == paragraphs.length - 1
+                                                    ? 0
+                                                    : settings.paragraphSpacing,
+                                              ),
+                                              child: _buildParagraphText(
+                                                context: context,
+                                                sentenceSlices: sentenceSlices,
+                                                textAlign: textAlign,
+                                                style: paragraphStyle,
+                                                highlightStyle: paragraphHighlightStyle,
+                                                isActiveParagraph: shouldHighlightTts &&
+                                                    tts.activeParagraphIndex == index,
+                                                highlightStart: tts.progressStart,
+                                                highlightEnd: tts.progressEnd,
+                                                onSentenceTap: (charOffset) {
+                                                  final hasActiveTtsSession =
+                                                      tts.contentKey == chapter.id &&
+                                                      (tts.status == TtsStatus.playing ||
+                                                          tts.status == TtsStatus.paused);
+                                                  final canStartFromSentence =
+                                                      settings.enableSentenceTapTts || hasActiveTtsSession;
+                                                  if (!canStartFromSentence) {
+                                                    return;
+                                                  }
+                                                  ref.read(ttsProvider.notifier).startReading(
+                                                    chapter.content,
+                                                    contentKey: chapter.id,
+                                                    title: 'Chương ${chapter.number}: ${chapter.title}',
+                                                    startParagraphIndex: index,
+                                                    startCharOffset: charOffset,
+                                                  );
+                                                },
+                                              ),
                                             ),
                                           ),
                                         ),
@@ -1614,20 +1655,18 @@ class _NavButtons extends StatelessWidget {
       children: [
         if (chapter.prevChapterId != null)
           Expanded(
-            child: OutlinedButton.icon(
+            child: OutlinedButton(
               onPressed: onGoPrevious,
-              icon: const Icon(Icons.chevron_left),
-              label: Text('Chương ${chapter.prevChapterNumber ?? '?'}'),
+              child: Text('< Chương ${chapter.prevChapterNumber ?? '?'}'),
             ),
           ),
         if (chapter.prevChapterId != null && chapter.nextChapterId != null)
           const SizedBox(width: 12),
         if (chapter.nextChapterId != null)
           Expanded(
-            child: FilledButton.icon(
+            child: FilledButton(
               onPressed: onGoNext,
-              icon: const Icon(Icons.chevron_right),
-              label: Text('Chương ${chapter.nextChapterNumber ?? '?'}'),
+              child: Text('> Chương ${chapter.nextChapterNumber ?? '?'}'),
             ),
           ),
       ],

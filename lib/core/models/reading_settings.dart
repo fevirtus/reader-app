@@ -10,6 +10,7 @@ class ReadingSettings {
     this.horizontalPadding = 20,
     this.paragraphSpacing = 24,
     this.textAlign = 'left',
+    this.enableSentenceTapTts = false,
   });
 
   final double fontSize;
@@ -22,6 +23,7 @@ class ReadingSettings {
   final double horizontalPadding;
   final double paragraphSpacing;
   final String textAlign;
+  final bool enableSentenceTapTts;
 
   ReadingSettings copyWith({
     double? fontSize,
@@ -34,6 +36,7 @@ class ReadingSettings {
     double? horizontalPadding,
     double? paragraphSpacing,
     String? textAlign,
+    bool? enableSentenceTapTts,
   }) =>
       ReadingSettings(
         fontSize: fontSize ?? this.fontSize,
@@ -46,6 +49,7 @@ class ReadingSettings {
         horizontalPadding: horizontalPadding ?? this.horizontalPadding,
         paragraphSpacing: paragraphSpacing ?? this.paragraphSpacing,
         textAlign: textAlign ?? this.textAlign,
+        enableSentenceTapTts: enableSentenceTapTts ?? this.enableSentenceTapTts,
       );
 
   factory ReadingSettings.fromJson(Map<String, dynamic> json) => ReadingSettings(
@@ -60,6 +64,7 @@ class ReadingSettings {
         horizontalPadding: (json['horizontalPadding'] as num?)?.toDouble() ?? 20,
         paragraphSpacing: (json['paragraphSpacing'] as num?)?.toDouble() ?? 24,
         textAlign: json['textAlign'] as String? ?? 'left',
+        enableSentenceTapTts: json['enableSentenceTapTts'] as bool? ?? false,
       );
 
   Map<String, dynamic> toJson() => {
@@ -73,5 +78,6 @@ class ReadingSettings {
         'horizontalPadding': horizontalPadding,
         'paragraphSpacing': paragraphSpacing,
         'textAlign': textAlign,
+        'enableSentenceTapTts': enableSentenceTapTts,
       };
 }

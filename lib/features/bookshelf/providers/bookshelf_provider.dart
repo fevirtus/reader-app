@@ -44,11 +44,37 @@ class BookshelfNotifier extends StateNotifier<AsyncValue<List<BookmarkModel>>> {
   bool isBookmarked(String novelId) {
     return (state.valueOrNull ?? []).any((b) => b.novelId == novelId);
   }
+
+  Future<void> removeFromShelf(String novelId, BookmarkType type) async {
+    try {
+      final client = _ref.read(apiClientProvider);
+      await client.dio.delete(
+        '/api/user/bookmarks/$novelId',
+        queryParameters: {'type': type.value},
+      );
+      final current = state.valueOrNull ?? [];
+      state = AsyncValue.data(
+        current.where((b) => b.novelId != novelId || b.type != type).toList(),
+      );
+    } catch (e, st) {
+      state = AsyncValue.error(e, st);
+    }
+  }
 }
 
 final bookshelfProvider =
     StateNotifierProvider<BookshelfNotifier, AsyncValue<List<BookmarkModel>>>((ref) {
   return BookshelfNotifier(ref);
+});
+
+final readingBookmarksProvider = Provider<List<BookmarkModel>>((ref) {
+  final bookmarks = ref.watch(bookshelfProvider).valueOrNull ?? [];
+  return bookmarks.where((b) => b.type == BookmarkType.reading).toList();
+});
+
+final savedBookmarksProvider = Provider<List<BookmarkModel>>((ref) {
+  final bookmarks = ref.watch(bookshelfProvider).valueOrNull ?? [];
+  return bookmarks.where((b) => b.type == BookmarkType.bookmarked).toList();
 });
 
 final isBookmarkedProvider = Provider.family<bool, String>((ref, novelId) {

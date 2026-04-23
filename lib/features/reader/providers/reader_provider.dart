@@ -145,6 +145,10 @@ class ReadingSettingsNotifier extends StateNotifier<ReadingSettings> {
     final localStore = _ref.read(localStoreProvider);
     await localStore.saveReadingSettings(settings);
   }
+
+  Future<void> setSentenceTapTtsEnabled(bool enabled) async {
+    await update(state.copyWith(enableSentenceTapTts: enabled));
+  }
 }
 
 final readingSettingsProvider =

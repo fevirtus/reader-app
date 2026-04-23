@@ -4,8 +4,6 @@ import '../../../core/models/novel_model.dart';
 import '../../../core/models/chapter_model.dart';
 import '../../../core/network/providers.dart';
 
-const chapterPageSize = 50;
-
 // ─── Browse / Search ──────────────────────────────────────────────────────────
 
 class BrowseParams {
@@ -28,11 +26,11 @@ class BrowseParams {
     if (raw == null || raw.isEmpty) return null;
     switch (raw.toLowerCase()) {
       case 'ongoing':
-        return 'Đang ra';
+        return 'ONGOING';
       case 'completed':
-        return 'Hoàn thành';
+        return 'COMPLETED';
       case 'hiatus':
-        return 'Tạm ngưng';
+        return 'HIATUS';
       default:
         return raw;
     }
@@ -189,77 +187,51 @@ final novelDetailProvider =
 
 // ─── Chapter List ─────────────────────────────────────────────────────────────
 
-class ChapterListQuery {
-  const ChapterListQuery({required this.novelId, this.page = 1});
-
-  final String novelId;
-  final int page;
-
-  @override
-  bool operator ==(Object other) {
-    if (identical(this, other)) return true;
-    return other is ChapterListQuery &&
-        other.novelId == novelId &&
-        other.page == page;
-  }
-
-  @override
-  int get hashCode => Object.hash(novelId, page);
-}
-
-class ChapterListPage {
-  const ChapterListPage({
-    required this.chapters,
-    required this.totalChapters,
-    required this.totalPages,
-    required this.currentPage,
-  });
-
-  final List<ChapterListItem> chapters;
-  final int totalChapters;
-  final int totalPages;
-  final int currentPage;
-}
-
 final chapterListProvider =
-    FutureProvider.family<ChapterListPage, ChapterListQuery>((ref, query) async {
+    FutureProvider.family<List<ChapterListItem>, String>((ref, novelId) async {
   final client = ref.read(apiClientProvider);
 
-  Future<Map<String, dynamic>> fetchChapterPage(String idOrSlug) async {
-    final res = await client.dio.get(
-      '/api/truyen/$idOrSlug/chapters',
-      queryParameters: {
-        'page': query.page,
-        'limit': chapterPageSize,
-      },
-    );
-    return res.data as Map<String, dynamic>;
+  Future<List<ChapterListItem>> fetchAllChapters(String idOrSlug) async {
+    const limit = 500;
+    var page = 1;
+    var totalPages = 1;
+    final items = <ChapterListItem>[];
+
+    while (page <= totalPages) {
+      final res = await client.dio.get(
+        '/api/truyen/$idOrSlug/chapters',
+        queryParameters: {'page': page, 'limit': limit},
+      );
+      final data = res.data as Map<String, dynamic>;
+      final chapters = data['chapters'] as List? ?? const [];
+
+      items.addAll(
+        chapters.map((e) => ChapterListItem.fromJson(e as Map<String, dynamic>)),
+      );
+
+      final apiTotalPages = (data['totalPages'] as num?)?.toInt() ?? 1;
+      totalPages = apiTotalPages > 0 ? apiTotalPages : 1;
+      page += 1;
+    }
+
+    return items;
   }
 
-  var data = await fetchChapterPage(query.novelId);
-  var chapters = data['chapters'] as List? ?? const [];
-
-  // Backend stores chapters by novel id in MongoDB; if route opened by slug,
-  // first request can return empty list. Resolve canonical id and retry once.
-  if (chapters.isEmpty) {
+  try {
+    return await fetchAllChapters(novelId);
+  } catch (_) {
+    // Backend stores chapters by novel id in MongoDB; if route opened by slug,
+    // first request can return empty list. Resolve canonical id and retry once.
     try {
-      final novelRes = await client.dio.get('/api/novels/${query.novelId}');
+      final novelRes = await client.dio.get('/api/novels/$novelId');
       final novelData = novelRes.data as Map<String, dynamic>;
       final canonicalId = novelData['id'] as String?;
-      if (canonicalId != null && canonicalId.isNotEmpty && canonicalId != query.novelId) {
-        data = await fetchChapterPage(canonicalId);
-        chapters = data['chapters'] as List? ?? const [];
+      if (canonicalId != null && canonicalId.isNotEmpty && canonicalId != novelId) {
+        return await fetchAllChapters(canonicalId);
       }
     } catch (_) {
       // Keep original empty list when fallback resolution fails.
     }
+    rethrow;
   }
-
-  return ChapterListPage(
-    chapters:
-        chapters.map((e) => ChapterListItem.fromJson(e as Map<String, dynamic>)).toList(),
-    totalChapters: (data['totalChapters'] as num?)?.toInt() ?? 0,
-    totalPages: (data['totalPages'] as num?)?.toInt() ?? 0,
-    currentPage: (data['currentPage'] as num?)?.toInt() ?? query.page,
-  );
 });

@@ -6,6 +6,7 @@ import 'package:go_router/go_router.dart';
 import '../../../app/router/route_names.dart';
 import '../../../core/models/bookmark_model.dart';
 import '../../../shared/widgets/main_app_header.dart';
+import '../../novel/providers/novels_provider.dart';
 import '../providers/bookshelf_provider.dart';
 import '../../auth/providers/auth_provider.dart';
 
@@ -50,7 +51,7 @@ class BookshelfScreen extends ConsumerWidget {
 
     return Scaffold(
       body: DefaultTabController(
-        length: 3,
+        length: 2,
         child: Column(
           children: [
             MainAppHeader(
@@ -68,9 +69,8 @@ class BookshelfScreen extends ConsumerWidget {
                   unselectedLabelColor: Colors.white70,
                   dividerColor: Colors.transparent,
                   tabs: const [
-                    Tab(text: 'Đã đọc'),
-                    Tab(text: 'Đã lưu'),
-                    Tab(text: 'Đang mở'),
+                    Tab(text: 'Đang đọc'),
+                    Tab(text: 'Đánh dấu'),
                   ],
                 ),
               ),
@@ -93,23 +93,18 @@ class BookshelfScreen extends ConsumerWidget {
                   ),
                 ),
                 data: (bookmarks) {
-                  final readItems = bookmarks.where((e) => e.readChapters.isNotEmpty).toList();
-                  final savedItems = bookmarks;
-                  final openingItems = bookmarks.where((e) => e.lastChapterId != null).toList();
+                  final readingItems = ref.watch(readingBookmarksProvider);
+                  final bookmarkedItems = ref.watch(savedBookmarksProvider);
 
                   return TabBarView(
                     children: [
                       _BookshelfList(
-                        bookmarks: readItems,
-                        emptyLabel: 'Chưa có truyện đã đọc.',
+                        bookmarks: readingItems,
+                        emptyLabel: 'Chưa có truyện đang đọc.',
                       ),
                       _BookshelfList(
-                        bookmarks: savedItems,
-                        emptyLabel: 'Chưa có truyện nào trong tủ sách.',
-                      ),
-                      _BookshelfList(
-                        bookmarks: openingItems,
-                        emptyLabel: 'Chưa có truyện đang mở.',
+                        bookmarks: bookmarkedItems,
+                        emptyLabel: 'Chưa có truyện đánh dấu.',
                       ),
                     ],
                   );
@@ -150,20 +145,57 @@ class _BookshelfList extends ConsumerWidget {
         padding: const EdgeInsets.fromLTRB(14, 14, 14, 24),
         itemCount: bookmarks.length,
         separatorBuilder: (context, index) => const SizedBox(height: 12),
-        itemBuilder: (context, index) => _BookmarkTile(bookmark: bookmarks[index]),
+        itemBuilder: (context, index) {
+          final bookmark = bookmarks[index];
+          return _BookmarkTile(
+            bookmark: bookmark,
+            onRemove: () => ref
+                .read(bookshelfProvider.notifier)
+                .removeFromShelf(bookmark.novelId, bookmark.type),
+          );
+        },
       ),
     );
   }
 }
 
-class _BookmarkTile extends StatelessWidget {
+class _BookmarkTile extends ConsumerWidget {
   final BookmarkModel bookmark;
-  const _BookmarkTile({required this.bookmark});
+  final VoidCallback onRemove;
+  const _BookmarkTile({
+    required this.bookmark,
+    required this.onRemove,
+  });
+
+  Future<void> _openContinueReader(BuildContext context, WidgetRef ref) async {
+    var targetChapterId = bookmark.lastChapterId;
+    if (targetChapterId == null || targetChapterId.isEmpty) {
+      try {
+        final chapters = await ref.read(
+          chapterListProvider(bookmark.novelId).future,
+        );
+        if (chapters.isNotEmpty) {
+          targetChapterId = chapters.first.id;
+        }
+      } catch (_) {
+        // Fall through to novel detail when chapter lookup fails.
+      }
+    }
+
+    if (!context.mounted) return;
+    if (targetChapterId != null && targetChapterId.isNotEmpty) {
+      context.push(RouteNames.readerChapter(targetChapterId));
+      return;
+    }
+    context.push(RouteNames.novelDetail(bookmark.novelId));
+  }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final novel = bookmark.novel;
-    return Container(
+    return GestureDetector(
+      onTap: () => context.push(RouteNames.novelDetail(bookmark.novelId)),
+      child: Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: Theme.of(context).colorScheme.surfaceContainerLow,
@@ -172,7 +204,7 @@ class _BookmarkTile extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
+            Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               ClipRRect(
@@ -211,7 +243,10 @@ class _BookmarkTile extends StatelessWidget {
                           ),
                         ),
                         const SizedBox(width: 8),
-                        const Icon(Icons.close_rounded, size: 20),
+                          GestureDetector(
+                            onTap: onRemove,
+                            child: const Icon(Icons.close_rounded, size: 20),
+                          ),
                       ],
                     ),
                     const SizedBox(height: 8),
@@ -249,21 +284,9 @@ class _BookmarkTile extends StatelessWidget {
             children: [
               Expanded(
                 child: FilledButton.icon(
-                  onPressed: () => context.push(RouteNames.novelDetail(bookmark.novelId)),
+                  onPressed: () => _openContinueReader(context, ref),
                   icon: const Icon(Icons.menu_book_rounded),
                   label: const Text('Đọc tiếp'),
-                  style: FilledButton.styleFrom(
-                    backgroundColor: const Color(0xFF14B8A6),
-                    foregroundColor: Colors.white,
-                  ),
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: FilledButton.icon(
-                  onPressed: () => context.push(RouteNames.novelDetail(bookmark.novelId)),
-                  icon: const Icon(Icons.headphones_rounded),
-                  label: const Text('Nghe tiếp'),
                   style: FilledButton.styleFrom(
                     backgroundColor: const Color(0xFF14B8A6),
                     foregroundColor: Colors.white,
@@ -273,6 +296,7 @@ class _BookmarkTile extends StatelessWidget {
             ],
           ),
         ],
+      ),
       ),
     );
   }
