@@ -5,6 +5,8 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 
+import '../../../core/config/app_config.dart';
+
 enum TtsStatus { idle, playing, paused }
 
 const double kTtsBaseSpeechRate = 0.9;
@@ -635,11 +637,18 @@ class TtsNotifier extends StateNotifier<TtsState> {
     int? startCharOffset,
     String? contentKey,
     String? title,
+    String? nextChapterId,
+    int? chapterNumber,
+    String? apiBaseUrl,
     bool includeTitle = true,
   }) async {
     if (!_initialized) {
       await (_initFuture ?? _init());
     }
+
+    // A direct start request (tap sentence/play button) should win over any
+    // queued chapter auto-start from previous navigation/completion events.
+    state = state.copyWith(clearPendingAutoStartChapterId: true);
 
     _segments = _buildSegments(
       content,
@@ -685,14 +694,18 @@ class TtsNotifier extends StateNotifier<TtsState> {
 
       try {
         await _mediaChannel.invokeMethod<void>('startReading', {
+          'content': content,
           'contentKey': contentKey,
           'title': title,
+          'nextChapterId': nextChapterId,
+          'chapterNumber': chapterNumber,
+          'apiBaseUrl': apiBaseUrl ?? AppConfig.baseUrl,
           'startIndex': validIndex,
           'speed': state.speed,
           'language': state.language,
           'voiceName': state.voiceName,
           'backgroundModeEnabled': state.backgroundModeEnabled,
-          'segments': _segments.map((segment) => segment.toMap()).toList(),
+          'includeTitle': includeTitle,
         });
       } on PlatformException {
         await _startFallbackReading(

@@ -11,6 +11,9 @@ class TtsPlayerWidget extends ConsumerWidget {
     required this.content,
     this.contentKey,
     this.title,
+    this.nextChapterId,
+    this.chapterNumber,
+    this.apiBaseUrl,
     this.includeTitleOnStart = true,
     this.resolveStartParagraphIndex,
     this.onStarted,
@@ -20,6 +23,9 @@ class TtsPlayerWidget extends ConsumerWidget {
   final String content;
   final String? contentKey;
   final String? title;
+  final String? nextChapterId;
+  final int? chapterNumber;
+  final String? apiBaseUrl;
   final bool includeTitleOnStart;
   final int Function()? resolveStartParagraphIndex;
   final VoidCallback? onStarted;
@@ -39,6 +45,8 @@ class TtsPlayerWidget extends ConsumerWidget {
         return;
       }
 
+      notifier.clearPendingAutoStartChapter();
+
       unawaited(
         notifier.startReading(
           content,
@@ -46,6 +54,9 @@ class TtsPlayerWidget extends ConsumerWidget {
           startParagraphIndex: resolveStartParagraphIndex?.call(),
           contentKey: contentKey,
           title: title,
+          nextChapterId: nextChapterId,
+          chapterNumber: chapterNumber,
+          apiBaseUrl: apiBaseUrl,
           includeTitle: includeTitleOnStart,
         ),
       );

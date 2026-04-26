@@ -1,6 +1,6 @@
 import 'dart:async';
 
-import 'package:flutter/gestures.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
@@ -8,6 +8,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../app/router/route_names.dart';
+import '../../../core/config/app_config.dart';
 import '../../../core/models/chapter_model.dart';
 import '../../../core/models/reading_settings.dart';
 import '../../../core/storage/local_store.dart';
@@ -97,38 +98,64 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
     required int highlightStart,
     required int highlightEnd,
     required Function(int charOffset) onSentenceTap,
+    // When true, renders Text.rich instead of SelectableText.rich.
+    // This avoids the "selection.isValid" assertion that fires when a
+    // TapGestureRecognizer on a span triggers TTS/scroll while SelectableText
+    // still holds a stale internal selection.
+    bool useTapRecognizer = false,
   }) {
-    if (sentenceSlices.isEmpty) {
-      return SelectableText(
-        '',
-        textAlign: textAlign,
-        style: style,
-        onTap: () => onSentenceTap(0),
+    final spans = sentenceSlices.map((slice) {
+      final start = slice.start;
+      final end = slice.end;
+
+      final isCurrentSpoken = isActiveParagraph &&
+          highlightStart >= 0 &&
+          highlightEnd > highlightStart &&
+          start >= highlightStart &&
+          end <= highlightEnd;
+
+      if (!useTapRecognizer) {
+        return TextSpan(
+          text: slice.text,
+          style: isCurrentSpoken ? highlightStyle : null,
+        );
+      }
+
+      // Use WidgetSpan + GestureDetector to avoid lifecycle issues from
+      // creating/discarding many TapGestureRecognizer instances across rebuilds.
+      return WidgetSpan(
+        alignment: PlaceholderAlignment.baseline,
+        baseline: TextBaseline.alphabetic,
+        child: GestureDetector(
+          behavior: HitTestBehavior.translucent,
+          onTap: () {
+            // Unfocus immediately so SelectableText drops its selection state
+            // before any scroll notification can call getBoxesForSelection.
+            FocusManager.instance.primaryFocus?.unfocus();
+            onSentenceTap(start);
+          },
+          child: Text(
+            slice.text,
+            style: isCurrentSpoken ? highlightStyle : style,
+          ),
+        ),
+      );
+    }).toList();
+
+    final textSpan = TextSpan(style: style, children: spans);
+
+    if (useTapRecognizer || sentenceSlices.isEmpty) {
+      // Use plain Text.rich when sentence-tap TTS is active.
+      // SelectableText keeps an internal TextEditingController/selection that
+      // becomes invalid after a programmatic rebuild, causing a Flutter
+      // assertion failure in getBoxesForSelection during scroll.
+      return GestureDetector(
+        onTap: sentenceSlices.isEmpty ? () => onSentenceTap(0) : null,
+        child: RichText(text: textSpan, textAlign: textAlign),
       );
     }
 
-    return SelectableText.rich(
-      TextSpan(
-        style: style,
-        children: sentenceSlices.map((slice) {
-          final start = slice.start;
-          final end = slice.end;
-
-          final isCurrentSpoken = isActiveParagraph &&
-              highlightStart >= 0 &&
-              highlightEnd > highlightStart &&
-              start >= highlightStart &&
-              end <= highlightEnd;
-
-          return TextSpan(
-            text: slice.text,
-            style: isCurrentSpoken ? highlightStyle : null,
-            recognizer: TapGestureRecognizer()..onTap = () => onSentenceTap(start),
-          );
-        }).toList(),
-      ),
-      textAlign: textAlign,
-    );
+    return SelectableText.rich(textSpan, textAlign: textAlign);
   }
 
   List<List<_SentenceSlice>> _sentenceSlicesForChapter(
@@ -250,7 +277,29 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
     final chapter = chapterAsync.valueOrNull;
     if (chapter == null) return;
 
+    if (previous.contentKey == chapter.id &&
+        next.contentKey != null &&
+        next.contentKey != chapter.id &&
+        next.contentKey != previous.contentKey &&
+        (next.status == TtsStatus.playing || next.status == TtsStatus.paused)) {
+      final targetChapterId = next.contentKey!;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        context.pushReplacement(RouteNames.readerChapter(targetChapterId));
+      });
+      return;
+    }
+
     // Chapter-completion → auto-advance to next chapter.
+    // On Android, native service already fetches and starts next chapter.
+    // Re-queueing auto-start from UI causes duplicate START_READING races.
+    if (defaultTargetPlatform == TargetPlatform.android) {
+      if (next.completedCount > _lastTtsCompletedCount) {
+        _lastTtsCompletedCount = next.completedCount;
+      }
+      return;
+    }
+
     if (next.completedCount > _lastTtsCompletedCount) {
       _lastTtsCompletedCount = next.completedCount;
       if (next.contentKey == chapter.id && chapter.nextChapterId != null) {
@@ -276,6 +325,9 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
           chapter.content,
           contentKey: chapter.id,
           title: 'Chương ${chapter.number}: ${chapter.title}',
+          nextChapterId: chapter.nextChapterId,
+          chapterNumber: chapter.number,
+          apiBaseUrl: AppConfig.baseUrl,
         );
         _autoStartQueuedChapterId = null;
       });
@@ -415,9 +467,11 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
     String targetChapterId,
   ) {
     final tts = ref.read(ttsProvider);
-    final isCurrentlyReading = tts.contentKey == currentChapterId &&
-        (tts.status == TtsStatus.playing || tts.status == TtsStatus.paused);
-    if (!isCurrentlyReading) return;
+    // Only auto-start on the target chapter when TTS is actively PLAYING.
+    // If paused, the user intentionally stopped – do not resume on navigation.
+    final isActivelyPlaying = tts.contentKey == currentChapterId &&
+        tts.status == TtsStatus.playing;
+    if (!isActivelyPlaying) return;
     ref.read(ttsProvider.notifier).scheduleAutoStartForChapter(targetChapterId);
   }
 
@@ -425,6 +479,16 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
     final tts = ref.read(ttsProvider);
     if (tts.pendingAutoStartChapterId != chapter.id) return;
     if (_autoStartQueuedChapterId == chapter.id) return;
+
+    // If native TTS service already moved to this chapter and is actively
+    // controlling playback, do not issue another manual START_READING.
+    final isAlreadyPlayingThisChapter =
+        tts.contentKey == chapter.id &&
+        (tts.status == TtsStatus.playing || tts.status == TtsStatus.paused);
+    if (isAlreadyPlayingThisChapter) {
+      ref.read(ttsProvider.notifier).clearPendingAutoStartChapter();
+      return;
+    }
 
     _autoStartQueuedChapterId = chapter.id;
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -435,6 +499,9 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
         chapter.content,
         contentKey: chapter.id,
         title: 'Chương ${chapter.number}: ${chapter.title}',
+        nextChapterId: chapter.nextChapterId,
+        chapterNumber: chapter.number,
+        apiBaseUrl: AppConfig.baseUrl,
       );
       _autoStartQueuedChapterId = null;
     });
@@ -549,6 +616,8 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
     String previewContent,
     String chapterId,
     String chapterTitle,
+    String? nextChapterId,
+    int? chapterNumber,
   ) async {
     await showModalBottomSheet<void>(
       context: context,
@@ -1019,6 +1088,9 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
                                                 content: previewContent,
                                                 contentKey: chapterId,
                                                 title: 'Chương $chapterTitle',
+                                                nextChapterId: nextChapterId,
+                                                chapterNumber: chapterNumber,
+                                                apiBaseUrl: AppConfig.baseUrl,
                                                 includeTitleOnStart: false,
                                                 resolveStartParagraphIndex:
                                                     _firstVisibleParagraphIndex,
@@ -1117,6 +1189,8 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
                           chapter.content,
                           chapter.id,
                           'Chương ${chapter.number}: ${chapter.title}',
+                          chapter.nextChapterId,
+                          chapter.number,
                         ),
                         barBackgroundColor: readerBackground,
                         foregroundColor: readerTextColor,
@@ -1255,14 +1329,27 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
                                                   if (!canStartFromSentence) {
                                                     return;
                                                   }
+                                                  // Synchronous unfocus clears stale SelectableText selection
+                                                  // before startReading triggers a widget rebuild + scroll.
+                                                  FocusManager.instance.primaryFocus?.unfocus();
+                                                  ref
+                                                      .read(ttsProvider.notifier)
+                                                      .clearPendingAutoStartChapter();
                                                   ref.read(ttsProvider.notifier).startReading(
                                                     chapter.content,
                                                     contentKey: chapter.id,
                                                     title: 'Chương ${chapter.number}: ${chapter.title}',
+                                                    nextChapterId: chapter.nextChapterId,
+                                                    chapterNumber: chapter.number,
+                                                    apiBaseUrl: AppConfig.baseUrl,
                                                     startParagraphIndex: index,
                                                     startCharOffset: charOffset,
                                                   );
                                                 },
+                                                useTapRecognizer: settings.enableSentenceTapTts ||
+                                                    (tts.contentKey == chapter.id &&
+                                                        (tts.status == TtsStatus.playing ||
+                                                            tts.status == TtsStatus.paused)),
                                               ),
                                             ),
                                           ),
@@ -1357,6 +1444,9 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
                 content: chapter.content,
                 contentKey: chapter.id,
                 title: 'Chương ${chapter.number}: ${chapter.title}',
+                nextChapterId: chapter.nextChapterId,
+                chapterNumber: chapter.number,
+                apiBaseUrl: AppConfig.baseUrl,
               ),
             ),
           );

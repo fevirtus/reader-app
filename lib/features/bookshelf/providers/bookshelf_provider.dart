@@ -23,6 +23,62 @@ class BookshelfNotifier extends StateNotifier<AsyncValue<List<BookmarkModel>>> {
     }
   }
 
+  void syncProgress({
+    required String novelId,
+    required String chapterId,
+    required int chapterNumber,
+    Map<String, dynamic>? serverBookmark,
+  }) {
+    final current = state.valueOrNull ?? const <BookmarkModel>[];
+
+    BookmarkModel? parsedFromServer;
+    if (serverBookmark != null) {
+      try {
+        parsedFromServer = BookmarkModel.fromJson(serverBookmark);
+      } catch (_) {
+        parsedFromServer = null;
+      }
+    }
+
+    final index = current.indexWhere((b) => b.novelId == novelId);
+    if (index >= 0) {
+      final existing = current[index];
+      final merged = parsedFromServer ?? BookmarkModel(
+        id: existing.id,
+        novelId: existing.novelId,
+        type: BookmarkType.reading,
+        lastChapterId: chapterId,
+        lastChapterNumber: chapterNumber,
+        readChapters: {
+          ...existing.readChapters,
+          chapterNumber,
+        }.toList()
+          ..sort(),
+        novel: existing.novel,
+      );
+
+      final updated = [...current]..[index] = merged;
+      state = AsyncValue.data(updated);
+      return;
+    }
+
+    if (parsedFromServer != null) {
+      state = AsyncValue.data([parsedFromServer, ...current]);
+      return;
+    }
+
+    // Fallback when API response doesn't include bookmark object.
+    final synthetic = BookmarkModel(
+      id: 'progress-$novelId',
+      novelId: novelId,
+      type: BookmarkType.reading,
+      lastChapterId: chapterId,
+      lastChapterNumber: chapterNumber,
+      readChapters: [chapterNumber],
+    );
+    state = AsyncValue.data([synthetic, ...current]);
+  }
+
   Future<void> toggle(String novelId) async {
     try {
       final client = _ref.read(apiClientProvider);

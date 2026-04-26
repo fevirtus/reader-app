@@ -13,7 +13,7 @@ import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodChannel
 import com.example.reader_app.tts.ReaderTtsMediaBridge
 import com.example.reader_app.tts.ReaderTtsMediaService
-import com.example.reader_app.tts.ReaderTtsSegment
+import com.example.reader_app.tts.ReaderTtsStartRequest
 
 class MainActivity : FlutterActivity() {
 	private val channelName = "reader_app/tts_background"
@@ -53,23 +53,34 @@ class MainActivity : FlutterActivity() {
 					}
 					"getSnapshot" -> result.success(ReaderTtsMediaBridge.snapshot())
 					"startReading" -> {
-						val startIndex = call.argument<Int>("startIndex") ?: 0
+						val content = call.argument<String>("content") ?: ""
 						val contentKey = call.argument<String>("contentKey")
 						val title = call.argument<String>("title")
 						val speed = call.argument<Double>("speed") ?: 0.9
 						val language = call.argument<String>("language") ?: "vi-VN"
 						val voiceName = call.argument<String>("voiceName")
 						val backgroundModeEnabled = call.argument<Boolean>("backgroundModeEnabled") ?: true
+						val nextChapterId = call.argument<String>("nextChapterId")
+						val chapterNumber = call.argument<Int>("chapterNumber")
+						val includeTitle = call.argument<Boolean>("includeTitle") ?: true
+						val apiBaseUrl = call.argument<String>("apiBaseUrl")
+						val startIndex = call.argument<Int>("startIndex") ?: 0
 						ReaderTtsMediaService.startReading(
 							this,
-							parseSegments(call.argument<List<*>>("segments")),
-							startIndex,
-							contentKey,
-							title,
-							speed,
-							language,
-							voiceName,
-							backgroundModeEnabled,
+							ReaderTtsStartRequest(
+								content = content,
+								contentKey = contentKey,
+								title = title,
+								speed = speed,
+								language = language,
+								voiceName = voiceName,
+								backgroundModeEnabled = backgroundModeEnabled,
+								nextChapterId = nextChapterId,
+								chapterNumber = chapterNumber,
+								includeTitle = includeTitle,
+								apiBaseUrl = apiBaseUrl,
+								startIndex = startIndex,
+							),
 						)
 						result.success(null)
 					}
@@ -135,24 +146,6 @@ class MainActivity : FlutterActivity() {
 					}
 				},
 			)
-	}
-
-	private fun parseSegments(rawSegments: List<*>?): ArrayList<ReaderTtsSegment> {
-		val segments = arrayListOf<ReaderTtsSegment>()
-		rawSegments.orEmpty().forEach { item ->
-			val map = item as? Map<*, *> ?: return@forEach
-			val text = map["text"]?.toString() ?: return@forEach
-			val paragraphIndex = (map["paragraphIndex"] as? Number)?.toInt() ?: -1
-			val start = (map["start"] as? Number)?.toInt() ?: -1
-			val end = (map["end"] as? Number)?.toInt() ?: -1
-			segments += ReaderTtsSegment(
-				text = text,
-				paragraphIndex = paragraphIndex,
-				start = start,
-				end = end,
-			)
-		}
-		return segments
 	}
 
 	private fun isIgnoringBatteryOptimizations(): Boolean {

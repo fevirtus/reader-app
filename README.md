@@ -115,3 +115,11 @@ Optional (iOS/web):
 ```bash
 --dart-define=GOOGLE_CLIENT_ID=<YOUR_IOS_OR_WEB_CLIENT_ID>.apps.googleusercontent.com
 ```
+
+
+Noted:
+
+Với MIUI:
+Cần hướng dẫn user (không thể fix bằng code)
+MIUI AutoStart: User phải vào Cài đặt → Ứng dụng → [app] → AutoStart và bật thủ công
+MIUI Battery Optimization: User phải vào Cài đặt → Pin → Ứng dụng tiêu hao pin → [app] → chọn "Không hạn chế" (permission REQUEST_IGNORE_BATTERY_OPTIMIZATIONS đã có trong Manifest để trigger dialog, nhưng user vẫn phải accept)

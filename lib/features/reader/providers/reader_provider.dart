@@ -6,6 +6,7 @@ import '../../../core/models/reading_settings.dart';
 import '../../../core/network/providers.dart';
 import '../../../core/storage/local_store.dart';
 import '../../../core/storage/offline_cache.dart';
+import '../../bookshelf/providers/bookshelf_provider.dart';
 
 // ─── Chapter content ─────────────────────────────────────────────────────────
 
@@ -94,12 +95,28 @@ class ReaderNotifier extends StateNotifier<ReadingProgress?> {
     // Also notify server (fire and forget)
     try {
       final client = _ref.read(apiClientProvider);
-      await client.dio.post('/api/user/reading-progress', data: {
+      final res = await client.dio.post('/api/user/reading-progress', data: {
         'novelId': _novelId,
         'chapterId': chapterId,
         'chapterNumber': chapterNumber,
         'progress': offset,
       });
+
+      final data = res.data;
+      Map<String, dynamic>? bookmarkJson;
+      if (data is Map<String, dynamic>) {
+        final bookmark = data['bookmark'];
+        if (bookmark is Map<String, dynamic>) {
+          bookmarkJson = bookmark;
+        }
+      }
+
+      _ref.read(bookshelfProvider.notifier).syncProgress(
+            novelId: _novelId!,
+            chapterId: chapterId,
+            chapterNumber: chapterNumber,
+            serverBookmark: bookmarkJson,
+          );
     } catch (_) {}
   }
 

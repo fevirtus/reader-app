@@ -16,7 +16,6 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
-import android.os.Parcelable
 import android.os.PowerManager
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
@@ -29,17 +28,27 @@ import android.support.v4.media.MediaMetadataCompat
 import android.support.v4.media.session.MediaSessionCompat
 import android.support.v4.media.session.PlaybackStateCompat
 import com.example.reader_app.R
-import kotlinx.parcelize.Parcelize
+import org.json.JSONObject
+import java.net.HttpURLConnection
+import java.net.URL
 import kotlin.math.min
 import java.util.Locale
+import java.util.concurrent.Executors
 
-@Parcelize
 data class ReaderTtsSegment(
 	val text: String,
 	val paragraphIndex: Int,
 	val start: Int,
 	val end: Int,
-) : Parcelable
+)
+
+private data class ReaderRemoteChapter(
+	val id: String,
+	val number: Int?,
+	val title: String?,
+	val content: String,
+	val nextChapterId: String?,
+)
 
 class ReaderTtsMediaService : Service(), TextToSpeech.OnInitListener {
 	companion object {
@@ -51,6 +60,7 @@ class ReaderTtsMediaService : Service(), TextToSpeech.OnInitListener {
 		private const val HEALTH_CHECK_INTERVAL_MS = 1500L
 		private const val START_GRACE_PERIOD_MS = 5_000L
 		private const val MAX_SEGMENT_RETRIES_BEFORE_SKIP = 4
+		private const val DEDUPE_START_WINDOW_MS = 600L
 
 		const val ACTION_INIT = "com.example.reader_app.tts.INIT"
 		const val ACTION_START_READING = "com.example.reader_app.tts.START_READING"
@@ -63,8 +73,7 @@ class ReaderTtsMediaService : Service(), TextToSpeech.OnInitListener {
 		const val ACTION_SET_VOICE = "com.example.reader_app.tts.SET_VOICE"
 		const val ACTION_SET_BACKGROUND_MODE = "com.example.reader_app.tts.SET_BACKGROUND_MODE"
 
-		const val EXTRA_SEGMENTS = "segments"
-		const val EXTRA_START_INDEX = "startIndex"
+		const val EXTRA_SESSION_TOKEN = "sessionToken"
 		const val EXTRA_CONTENT_KEY = "contentKey"
 		const val EXTRA_TITLE = "title"
 		const val EXTRA_SPEED = "speed"
@@ -84,30 +93,14 @@ class ReaderTtsMediaService : Service(), TextToSpeech.OnInitListener {
 			)
 		}
 
-		fun startReading(
-			context: Context,
-			segments: ArrayList<ReaderTtsSegment>,
-			startIndex: Int,
-			contentKey: String?,
-			title: String?,
-			speed: Double,
-			language: String,
-			voiceName: String?,
-			backgroundModeEnabled: Boolean,
-		): Boolean {
+		fun startReading(context: Context, request: ReaderTtsStartRequest): Boolean {
 			return try {
+				val sessionToken = ReaderTtsPlaybackStore.enqueue(request)
 				ContextCompat.startForegroundService(
 					context,
 					Intent(context, ReaderTtsMediaService::class.java).apply {
 						action = ACTION_START_READING
-						putParcelableArrayListExtra(EXTRA_SEGMENTS, segments)
-						putExtra(EXTRA_START_INDEX, startIndex)
-						putExtra(EXTRA_CONTENT_KEY, contentKey)
-						putExtra(EXTRA_TITLE, title)
-						putExtra(EXTRA_SPEED, speed)
-						putExtra(EXTRA_LANGUAGE, language)
-						putExtra(EXTRA_VOICE_NAME, voiceName)
-						putExtra(EXTRA_BACKGROUND_MODE_ENABLED, backgroundModeEnabled)
+						putExtra(EXTRA_SESSION_TOKEN, sessionToken)
 					},
 				)
 				true
@@ -201,7 +194,17 @@ class ReaderTtsMediaService : Service(), TextToSpeech.OnInitListener {
 	private var consecutiveSilentHealthChecks = 0
 	private var utteranceWatchdog: Runnable? = null
 	private var pausedByAudioFocus = false
+	private var isDuckedByAudioFocus = false
+	private var volumeMultiplier = 1.0f
 	private var lastSpeakRequestTimeMs = 0L
+	private var nextChapterId: String? = null
+	private var chapterNumber: Int? = null
+	private var includeChapterTitleInPlayback = true
+	private var apiBaseUrl: String? = null
+	private var isPreparingNextChapter = false
+	private var lastStartSignature: String? = null
+	private var lastStartRequestAtMs = 0L
+	private val networkExecutor = Executors.newSingleThreadExecutor()
 	private val playbackHealthRunnable = object : Runnable {
 		override fun run() {
 			runPlaybackHealthCheck()
@@ -214,15 +217,27 @@ class ReaderTtsMediaService : Service(), TextToSpeech.OnInitListener {
 			when (focusChange) {
 				AudioManager.AUDIOFOCUS_LOSS,
 				AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> {
+					clearDuckingState(restartPlayback = false)
 					if (status == "playing") {
 						pausedByAudioFocus = true
 						handlePause()
 					}
 				}
+				AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> handleDuckAudioFocusLoss()
 				AudioManager.AUDIOFOCUS_GAIN -> {
+					val shouldRestorePlaybackVolume = isDuckedByAudioFocus
+					clearDuckingState(
+						restartPlayback = shouldRestorePlaybackVolume && status == "playing",
+					)
 					if (pausedByAudioFocus && status == "paused") {
 						pausedByAudioFocus = false
 						handleResume()
+					} else if (pausedByAudioFocus && status == "playing") {
+						// Delayed focus grant arrived while status was already "playing"
+						// (set optimistically). Treat same as resume.
+						pausedByAudioFocus = false
+						clearAudioFocusRetry()
+						speakCurrentSegment(forceRestart = true)
 					}
 				}
 			}
@@ -236,6 +251,11 @@ class ReaderTtsMediaService : Service(), TextToSpeech.OnInitListener {
 		powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
 		createNotificationChannel()
 		setupMediaSession()
+		// Call startForeground() IMMEDIATELY in onCreate() before any async work.
+		// Android O+ (and MIUI strictly enforced) requires startForeground() to be called
+		// within 5 seconds of startForegroundService(). TTS engine init is async and may
+		// take longer on cold start / low-end devices, so we must not wait for it.
+		isForegroundActive = startForegroundCompat(buildIdleNotification())
 		setupTextToSpeech()
 		mainHandler.postDelayed(playbackHealthRunnable, HEALTH_CHECK_INTERVAL_MS)
 		publishSnapshot()
@@ -264,13 +284,17 @@ class ReaderTtsMediaService : Service(), TextToSpeech.OnInitListener {
 			ACTION_SKIP_BACK -> handleSkip(-1)
 			ACTION_SET_SPEED -> {
 				speed = intent.getDoubleExtra(EXTRA_SPEED, speed)
-				applyVoiceAndSpeedSettings()
+				if (isTtsReady) {
+					applyVoiceAndSpeedSettings()
+				}
 				publishSnapshot()
 			}
 			ACTION_SET_VOICE -> {
 				voiceName = intent.getStringExtra(EXTRA_VOICE_NAME)
 				language = intent.getStringExtra(EXTRA_LANGUAGE) ?: language
-				applyVoiceAndSpeedSettings()
+				if (isTtsReady) {
+					applyVoiceAndSpeedSettings()
+				}
 				publishSnapshot()
 			}
 			ACTION_SET_BACKGROUND_MODE -> {
@@ -411,27 +435,64 @@ class ReaderTtsMediaService : Service(), TextToSpeech.OnInitListener {
 	}
 
 	private fun handleStartReading(intent: Intent) {
+		val request = ReaderTtsPlaybackStore.consume(intent.getStringExtra(EXTRA_SESSION_TOKEN))
+		if (request == null) {
+			Log.e(TAG, "Missing in-memory TTS start request; refusing to start playback")
+			handleStop(clearContentKey = true, reason = "missing_start_request")
+			return
+		}
+
+		val now = System.currentTimeMillis()
+		val signature = listOf(
+			request.contentKey ?: "",
+			request.title ?: "",
+			request.chapterNumber?.toString() ?: "",
+			request.startIndex.toString(),
+			request.includeTitle.toString(),
+			request.content.length.toString(),
+		).joinToString("|")
+		val isDuplicateRapidStart =
+			signature == lastStartSignature &&
+			(now - lastStartRequestAtMs) in 0..DEDUPE_START_WINDOW_MS
+		if (isDuplicateRapidStart && (status == "playing" || status == "paused")) {
+			Log.w(TAG, "Ignore duplicated rapid START_READING request")
+			return
+		}
+		lastStartSignature = signature
+		lastStartRequestAtMs = now
+
 		cancelIdleStop()
-		backgroundModeEnabled = intent.getBooleanExtra(
-			EXTRA_BACKGROUND_MODE_ENABLED,
-			backgroundModeEnabled,
+		backgroundModeEnabled = request.backgroundModeEnabled
+		speed = request.speed
+		language = request.language
+		voiceName = request.voiceName
+		contentKey = request.contentKey
+		title = request.title
+		nextChapterId = request.nextChapterId
+		chapterNumber = request.chapterNumber
+		includeChapterTitleInPlayback = request.includeTitle
+		apiBaseUrl = request.apiBaseUrl?.trimEnd('/')
+		segments = buildSegments(
+			content = request.content,
+			title = request.title,
+			includeTitle = includeChapterTitleInPlayback,
 		)
-		speed = intent.getDoubleExtra(EXTRA_SPEED, speed)
-		language = intent.getStringExtra(EXTRA_LANGUAGE) ?: language
-		voiceName = intent.getStringExtra(EXTRA_VOICE_NAME)
-		contentKey = intent.getStringExtra(EXTRA_CONTENT_KEY)
-		title = intent.getStringExtra(EXTRA_TITLE)
-		segments = extractSegments(intent)
-		currentIndex = intent.getIntExtra(EXTRA_START_INDEX, 0)
-			.coerceIn(0, (segments.size - 1).coerceAtLeast(0))
+		currentIndex = request.startIndex.coerceIn(0, (segments.size - 1).coerceAtLeast(0))
 		sessionGeneration += 1
 		clearUtteranceRuntimeState()
+		clearDuckingState(restartPlayback = false)
+		isPreparingNextChapter = false
 		status = "playing"
 		pausedByAudioFocus = false
 		pendingReplayAfterInit = false
 		tts?.stop()
 		syncPowerState()
 		publishSnapshot()
+
+		if (segments.isEmpty()) {
+			handleStop(clearContentKey = false, reason = "empty_segments")
+			return
+		}
 
 		if (!isTtsReady) return
 		speakCurrentSegment(forceRestart = true)
@@ -442,6 +503,7 @@ class ReaderTtsMediaService : Service(), TextToSpeech.OnInitListener {
 		sessionGeneration += 1
 		clearUtteranceRuntimeState()
 		status = "paused"
+		isPreparingNextChapter = false
 		pendingReplayAfterInit = false
 		tts?.stop()
 		syncPowerState()
@@ -453,6 +515,7 @@ class ReaderTtsMediaService : Service(), TextToSpeech.OnInitListener {
 		if (segments.isEmpty()) return
 		cancelIdleStop()
 		status = "playing"
+		isPreparingNextChapter = false
 		sessionGeneration += 1
 		clearUtteranceRuntimeState()
 		pendingReplayAfterInit = false
@@ -468,10 +531,15 @@ class ReaderTtsMediaService : Service(), TextToSpeech.OnInitListener {
 		clearScheduledRecoveries()
 		cancelIdleStop()
 		clearUtteranceRuntimeState()
+		clearDuckingState(restartPlayback = false)
+		isPreparingNextChapter = false
 		status = "idle"
 		currentIndex = 0
 		segments = emptyList()
 		title = null
+		nextChapterId = null
+		chapterNumber = null
+		apiBaseUrl = null
 		if (clearContentKey) {
 			contentKey = null
 		}
@@ -490,6 +558,7 @@ class ReaderTtsMediaService : Service(), TextToSpeech.OnInitListener {
 		currentIndex = nextIndex
 		sessionGeneration += 1
 		clearUtteranceRuntimeState()
+		isPreparingNextChapter = false
 		status = "playing"
 		pendingReplayAfterInit = false
 		tts?.stop()
@@ -505,16 +574,7 @@ class ReaderTtsMediaService : Service(), TextToSpeech.OnInitListener {
 
 		val nextIndex = currentIndex + 1
 		if (nextIndex >= segments.size) {
-			status = "idle"
-			currentIndex = 0
-			completedCount += 1
-			Log.i(TAG, "chapter_completed contentKey=$contentKey completedCount=$completedCount")
-			clearUtteranceRuntimeState()
-			abandonAudioFocus()
-			syncPowerState()
-			syncNotificationState()
-			publishSnapshot()
-			scheduleIdleStop()
+			handleChapterCompleted()
 			return
 		}
 
@@ -542,6 +602,7 @@ class ReaderTtsMediaService : Service(), TextToSpeech.OnInitListener {
 
 	private fun speakCurrentSegment(forceRestart: Boolean) {
 		if (segments.isEmpty() || !isTtsReady) return
+		isPreparingNextChapter = false
 		if (!requestAudioFocus()) {
 			pausedByAudioFocus = true
 			status = "paused"
@@ -576,10 +637,20 @@ class ReaderTtsMediaService : Service(), TextToSpeech.OnInitListener {
 		scheduleUtteranceWatchdog(utteranceId)
 		val speakResult = try {
 			if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-				tts?.speak(segment.text, TextToSpeech.QUEUE_FLUSH, Bundle(), utteranceId)
+				val params = Bundle().apply {
+					putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, volumeMultiplier)
+				}
+				tts?.speak(segment.text, TextToSpeech.QUEUE_FLUSH, params, utteranceId)
 			} else {
 				@Suppress("DEPRECATION")
-				tts?.speak(segment.text, TextToSpeech.QUEUE_FLUSH, null)
+				tts?.speak(
+					segment.text,
+					TextToSpeech.QUEUE_FLUSH,
+					hashMapOf(
+						TextToSpeech.Engine.KEY_PARAM_UTTERANCE_ID to utteranceId,
+						TextToSpeech.Engine.KEY_PARAM_VOLUME to volumeMultiplier.toString(),
+					),
+				)
 			}
 		} catch (e: Exception) {
 			Log.e(TAG, "speak() failed for index=$currentIndex", e)
@@ -761,10 +832,13 @@ class ReaderTtsMediaService : Service(), TextToSpeech.OnInitListener {
 							.build(),
 					)
 					.setAcceptsDelayedFocusGain(true)
+					.setWillPauseWhenDucked(false)
 					.setOnAudioFocusChangeListener(audioFocusListener)
 					.build()
 					.also { audioFocusRequest = it }
 			val result = audioManager.requestAudioFocus(request)
+			// AUDIOFOCUS_REQUEST_DELAYED (= 2) means focus will arrive via the listener.
+			// Treat it as "not yet granted" – the listener will resume playback on GAIN.
 			result == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
 		} else {
 			@Suppress("DEPRECATION")
@@ -846,7 +920,7 @@ class ReaderTtsMediaService : Service(), TextToSpeech.OnInitListener {
 			if (wakeLock?.isHeld == true) return
 			wakeLock = powerManager.newWakeLock(
 				PowerManager.PARTIAL_WAKE_LOCK,
-				"reader_app:ReaderTtsPlayback"
+				"$packageName:ReaderTtsPlayback"
 			).apply {
 				setReferenceCounted(false)
 				acquire()
@@ -875,6 +949,7 @@ class ReaderTtsMediaService : Service(), TextToSpeech.OnInitListener {
 	private fun currentSegment(): ReaderTtsSegment? = segments.getOrNull(currentIndex)
 
 	private fun currentProgressLabel(): String {
+		if (isPreparingNextChapter) return "Đang tải chương tiếp theo"
 		if (segments.isEmpty()) return voiceName ?: language
 		return "Câu ${currentIndex + 1}/${segments.size}"
 	}
@@ -909,6 +984,16 @@ class ReaderTtsMediaService : Service(), TextToSpeech.OnInitListener {
 			PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
 		)
 	}
+
+	/** Minimal notification used in onCreate() to satisfy the 5-second startForeground() rule. */
+	private fun buildIdleNotification() = NotificationCompat.Builder(this, CHANNEL_ID)
+		.setSmallIcon(android.R.drawable.ic_media_play)
+		.setContentTitle(appLabel())
+		.setContentText("Đang khởi động TTS…")
+		.setOngoing(true)
+		.setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+		.setCategory(NotificationCompat.CATEGORY_SERVICE)
+		.build()
 
 	@SuppressLint("MissingPermission")
 	private fun buildNotification() = NotificationCompat.Builder(this, CHANNEL_ID)
@@ -1071,6 +1156,7 @@ class ReaderTtsMediaService : Service(), TextToSpeech.OnInitListener {
 				"contentKey" to contentKey,
 				"completedCount" to completedCount,
 				"backgroundModeEnabled" to backgroundModeEnabled,
+				"isPreparingNextChapter" to isPreparingNextChapter,
 				"language" to language,
 				"voiceName" to voiceName,
 				"availableVietnameseVoices" to availableVoices,
@@ -1084,23 +1170,254 @@ class ReaderTtsMediaService : Service(), TextToSpeech.OnInitListener {
 		val channel = NotificationChannel(
 			CHANNEL_ID,
 			CHANNEL_NAME,
-			NotificationManager.IMPORTANCE_LOW,
+			// IMPORTANCE_DEFAULT is required on MIUI 12+ so the system does not demote
+			// the foreground service. Sound/vibration are disabled explicitly so the user
+			// is not disturbed despite the higher importance level.
+			NotificationManager.IMPORTANCE_DEFAULT,
 		).apply {
 			description = "Điều khiển đọc truyện bằng TTS"
 			setShowBadge(false)
+			setSound(null, null)
+			enableLights(false)
+			enableVibration(false)
 		}
 		manager.createNotificationChannel(channel)
 	}
 
-	private fun extractSegments(intent: Intent): List<ReaderTtsSegment> {
-		return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-			intent.getParcelableArrayListExtra(EXTRA_SEGMENTS, ReaderTtsSegment::class.java)
-				?: arrayListOf()
-		} else {
-			@Suppress("DEPRECATION")
-			(intent.getParcelableArrayListExtra<ReaderTtsSegment>(EXTRA_SEGMENTS)
-				?: arrayListOf())
+	private fun sanitizeForTts(raw: String): String {
+		if (raw.isBlank()) return raw
+		return raw
+			.replace(Regex("[\"“”]"), " ")
+			.replace(Regex("[_\\$#^*+=~`|<>\\\\\\[\\]{}]"), " ")
+			.replace(Regex("\\s+"), " ")
+			.trim()
+	}
+
+	private fun buildSegments(
+		content: String,
+		title: String?,
+		includeTitle: Boolean,
+	): List<ReaderTtsSegment> {
+		val builtSegments = mutableListOf<ReaderTtsSegment>()
+		val trimmedTitle = title?.trim().orEmpty()
+		if (includeTitle && trimmedTitle.isNotEmpty()) {
+			val sanitizedTitle = sanitizeForTts(trimmedTitle)
+			if (sanitizedTitle.isNotEmpty()) {
+				builtSegments += ReaderTtsSegment(
+					text = sanitizedTitle,
+					paragraphIndex = -1,
+					start = -1,
+					end = -1,
+				)
+			}
 		}
+
+		val paragraphs = content
+			.split(Regex("\\n+"))
+			.map(String::trim)
+			.filter(String::isNotEmpty)
+		val sentenceRegex = Regex("[^.!?…]+[.!?…]*")
+
+		paragraphs.forEachIndexed { paragraphIndex, paragraph ->
+			var cursor = 0
+			sentenceRegex.findAll(paragraph).forEach { match ->
+				val sentence = match.value.trim()
+				if (sentence.isEmpty()) return@forEach
+				val sanitizedSentence = sanitizeForTts(sentence)
+				if (sanitizedSentence.isEmpty()) return@forEach
+
+				var start = paragraph.indexOf(sentence, cursor)
+				if (start < 0) {
+					start = cursor.coerceIn(0, paragraph.length)
+				}
+				val end = (start + sentence.length).coerceIn(0, paragraph.length)
+				cursor = end
+
+				builtSegments += ReaderTtsSegment(
+					text = sanitizedSentence,
+					paragraphIndex = paragraphIndex,
+					start = start,
+					end = end,
+				)
+			}
+		}
+
+		return builtSegments
+	}
+
+	private fun handleChapterCompleted() {
+		clearUtteranceRuntimeState()
+		val nextId = nextChapterId
+		if (nextId.isNullOrBlank() || apiBaseUrl.isNullOrBlank()) {
+			finishPlaybackAfterChapterCompletion()
+			return
+		}
+
+		isPreparingNextChapter = true
+		syncNotificationState()
+		publishSnapshot()
+		fetchAndPlayNextChapter(nextId, sessionGeneration)
+	}
+
+	private fun finishPlaybackAfterChapterCompletion() {
+		status = "idle"
+		currentIndex = 0
+		completedCount += 1
+		Log.i(TAG, "chapter_completed contentKey=$contentKey completedCount=$completedCount")
+		clearUtteranceRuntimeState()
+		clearDuckingState(restartPlayback = false)
+		abandonAudioFocus()
+		syncPowerState()
+		syncNotificationState()
+		publishSnapshot()
+		scheduleIdleStop()
+	}
+
+	private fun fetchAndPlayNextChapter(chapterId: String, generation: Int) {
+		networkExecutor.execute {
+			val remoteChapter = fetchChapterWithRetries(chapterId)
+			mainHandler.post {
+				if (generation != sessionGeneration || status == "idle") return@post
+				if (remoteChapter == null) {
+					Log.e(TAG, "Failed to fetch next chapter chapterId=$chapterId")
+					isPreparingNextChapter = false
+					finishPlaybackAfterChapterCompletion()
+					return@post
+				}
+				adoptRemoteChapter(remoteChapter)
+			}
+		}
+	}
+
+	private fun fetchChapterWithRetries(chapterId: String): ReaderRemoteChapter? {
+		repeat(3) { attempt ->
+			try {
+				return fetchChapter(chapterId)
+			} catch (error: Throwable) {
+				Log.w(TAG, "fetch_next_chapter_failed attempt=${attempt + 1} chapterId=$chapterId", error)
+				if (attempt < 2) {
+					Thread.sleep((750L * (attempt + 1)).coerceAtMost(2_500L))
+				}
+			}
+		}
+		return null
+	}
+
+	private fun fetchChapter(chapterId: String): ReaderRemoteChapter {
+		val baseUrl = apiBaseUrl?.trimEnd('/') ?: error("Missing api base URL for TTS service")
+		val connection = (URL("$baseUrl/api/chapters/$chapterId").openConnection() as HttpURLConnection).apply {
+			requestMethod = "GET"
+			connectTimeout = 20_000
+			readTimeout = 20_000
+			setRequestProperty("Accept", "application/json")
+		}
+
+		try {
+			val statusCode = connection.responseCode
+			val responseBody = (if (statusCode in 200..299) {
+				connection.inputStream
+			} else {
+				connection.errorStream
+			})?.bufferedReader()?.use { it.readText() }.orEmpty()
+
+			if (statusCode !in 200..299) {
+				error("HTTP $statusCode when fetching chapter $chapterId: $responseBody")
+			}
+
+			val json = JSONObject(responseBody)
+			val id = json.optString("id").takeIf { it.isNotBlank() }
+				?: error("Chapter payload missing id")
+			val title = json.optString("title").takeIf { it.isNotBlank() }
+			val content = json.optString("content")
+			val nextId = json.optString("nextChapterId").takeIf { it.isNotBlank() }
+			val number = if (json.isNull("number")) null else json.optInt("number")
+
+			return ReaderRemoteChapter(
+				id = id,
+				number = number,
+				title = title,
+				content = content,
+				nextChapterId = nextId,
+			)
+		} finally {
+			connection.disconnect()
+		}
+	}
+
+	private fun adoptRemoteChapter(remoteChapter: ReaderRemoteChapter) {
+		val nextTitle = buildChapterTitle(remoteChapter.number, remoteChapter.title)
+		val nextSegments = buildSegments(
+			content = remoteChapter.content,
+			title = nextTitle,
+			includeTitle = includeChapterTitleInPlayback,
+		)
+		if (nextSegments.isEmpty()) {
+			Log.e(TAG, "Fetched next chapter has no readable segments id=${remoteChapter.id}")
+			isPreparingNextChapter = false
+			finishPlaybackAfterChapterCompletion()
+			return
+		}
+
+		completedCount += 1
+		contentKey = remoteChapter.id
+		title = nextTitle
+		chapterNumber = remoteChapter.number
+		nextChapterId = remoteChapter.nextChapterId
+		segments = nextSegments
+		currentIndex = 0
+		sessionGeneration += 1
+		clearUtteranceRuntimeState()
+		isPreparingNextChapter = false
+		status = "playing"
+		pausedByAudioFocus = false
+		pendingReplayAfterInit = false
+		clearDuckingState(restartPlayback = false)
+		publishSnapshot()
+
+		if (!isTtsReady) {
+			pendingReplayAfterInit = true
+			scheduleEngineRebuild("next_chapter_tts_not_ready")
+			return
+		}
+
+		speakCurrentSegment(forceRestart = true)
+	}
+
+	private fun buildChapterTitle(number: Int?, rawTitle: String?): String? {
+		val trimmedTitle = rawTitle?.trim().orEmpty()
+		return when {
+			number != null && trimmedTitle.isNotEmpty() -> "Chương $number: $trimmedTitle"
+			number != null -> "Chương $number"
+			trimmedTitle.isNotEmpty() -> trimmedTitle
+			else -> null
+		}
+	}
+
+	private fun handleDuckAudioFocusLoss() {
+		pausedByAudioFocus = false
+		if (isDuckedByAudioFocus) return
+		isDuckedByAudioFocus = true
+		volumeMultiplier = 0.35f
+		if (status == "playing" && !isPreparingNextChapter) {
+			restartCurrentSegmentForFocusChange()
+		}
+	}
+
+	private fun clearDuckingState(restartPlayback: Boolean) {
+		if (!isDuckedByAudioFocus && volumeMultiplier == 1.0f) return
+		isDuckedByAudioFocus = false
+		volumeMultiplier = 1.0f
+		if (restartPlayback && status == "playing" && !isPreparingNextChapter) {
+			restartCurrentSegmentForFocusChange()
+		}
+	}
+
+	private fun restartCurrentSegmentForFocusChange() {
+		if (segments.isEmpty() || !isTtsReady) return
+		sessionGeneration += 1
+		clearUtteranceRuntimeState()
+		tts?.stop()
+		speakCurrentSegment(forceRestart = true)
 	}
 
 	override fun onDestroy() {
@@ -1111,8 +1428,13 @@ class ReaderTtsMediaService : Service(), TextToSpeech.OnInitListener {
 		status = "idle"
 		currentIndex = 0
 		segments = emptyList()
+		nextChapterId = null
+		chapterNumber = null
+		apiBaseUrl = null
+		isPreparingNextChapter = false
 		clearUtteranceRuntimeState()
 		pendingReplayAfterInit = false
+		clearDuckingState(restartPlayback = false)
 		publishSnapshot()
 		tts?.stop()
 		tts?.shutdown()
@@ -1123,6 +1445,7 @@ class ReaderTtsMediaService : Service(), TextToSpeech.OnInitListener {
 			isForegroundActive = false
 		}
 		mediaSession.release()
+		networkExecutor.shutdownNow()
 		super.onDestroy()
 	}
 }

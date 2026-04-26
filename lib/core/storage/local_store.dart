@@ -16,6 +16,7 @@ class LocalStore {
   static const _kProgressChapterId = 'progress_chapter_id_';
   static const _kProgressChapterNum = 'progress_chapter_num_';
   static const _kProgressOffset = 'progress_offset_';
+  static const _kLastRoutePath = 'last_route_path';
 
   // ── Reading settings ──────────────────────────────────────────────────────
 
@@ -85,6 +86,27 @@ class LocalStore {
       'chapterNumber': prefs.getInt('$_kProgressChapterNum$novelId') ?? 1,
       'scrollOffset': prefs.getDouble('$_kProgressOffset$novelId') ?? 0.0,
     };
+  }
+
+  // ── Last route restore (cold start after process reclaim) ───────────────
+
+  Future<void> saveLastRoutePath(String path) async {
+    final normalized = path.trim();
+    if (normalized.isEmpty || normalized == '/') return;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_kLastRoutePath, normalized);
+  }
+
+  Future<String?> loadLastRoutePath() async {
+    final prefs = await SharedPreferences.getInstance();
+    final value = prefs.getString(_kLastRoutePath)?.trim();
+    if (value == null || value.isEmpty) return null;
+    return value;
+  }
+
+  Future<void> clearLastRoutePath() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_kLastRoutePath);
   }
 }
 

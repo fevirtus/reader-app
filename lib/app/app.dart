@@ -1,9 +1,13 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../core/auth/session_expiry_notifier.dart';
 import '../core/theme/app_theme.dart';
+import '../core/storage/local_store.dart';
 import '../features/auth/providers/auth_provider.dart';
 import '../features/reader/tts/tts_service.dart';
 import 'router/route_names.dart';
@@ -19,10 +23,23 @@ class ReaderApp extends ConsumerStatefulWidget {
 class _ReaderAppState extends ConsumerState<ReaderApp> {
   final _scaffoldMessengerKey = GlobalKey<ScaffoldMessengerState>();
   ProviderSubscription<int>? _sessionExpirySub;
+  late final GoRouter _router;
+
+  void _persistRouteForRestore() {
+    if (!mounted) return;
+    unawaited(() async {
+      final uri = _router.state.uri;
+      final fullPath = uri.hasQuery ? '${uri.path}?${uri.query}' : uri.path;
+      if (fullPath == RouteNames.splash) return;
+      await ref.read(localStoreProvider).saveLastRoutePath(fullPath);
+    }());
+  }
 
   @override
   void initState() {
     super.initState();
+    _router = ref.read(appRouterProvider);
+    _router.routerDelegate.addListener(_persistRouteForRestore);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _ensureMandatoryTtsRequirements();
     });
@@ -92,6 +109,7 @@ class _ReaderAppState extends ConsumerState<ReaderApp> {
 
   @override
   void dispose() {
+    _router.routerDelegate.removeListener(_persistRouteForRestore);
     _sessionExpirySub?.close();
     super.dispose();
   }
