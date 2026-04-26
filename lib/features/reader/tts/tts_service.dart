@@ -261,6 +261,22 @@ class TtsNotifier extends StateNotifier<TtsState> {
     await _mediaChannel.invokeMethod<void>('openNotificationSettings');
   }
 
+  Future<void> refreshNativeSnapshot() async {
+    if (!_useNativeAndroidMediaService) return;
+
+    if (!_initialized) {
+      await (_initFuture ?? _init());
+      return;
+    }
+
+    try {
+      final snapshot = await _mediaChannel.invokeMethod<dynamic>('getSnapshot');
+      _applyAndroidSnapshot(snapshot);
+    } catch (_) {
+      // Ignore snapshot pull errors; event stream updates will continue.
+    }
+  }
+
   Future<void> _configureVietnameseVoiceWithFlutterTts() async {
     final dynamic voicesRaw = await _tts.getVoices;
 

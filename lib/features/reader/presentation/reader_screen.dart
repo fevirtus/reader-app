@@ -26,7 +26,8 @@ class ReaderScreen extends ConsumerStatefulWidget {
   ConsumerState<ReaderScreen> createState() => _ReaderScreenState();
 }
 
-class _ReaderScreenState extends ConsumerState<ReaderScreen> {
+class _ReaderScreenState extends ConsumerState<ReaderScreen>
+    with WidgetsBindingObserver {
   static const List<Color> _backgroundColorChoices = [
     Color(0xFFFFFEF8),
     Color(0xFFF6EAD7),
@@ -260,11 +261,39 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
     return partiallyVisibleIndex ?? 0;
   }
 
+  Future<void> _reconcileChapterWithNativeTts() async {
+    if (defaultTargetPlatform != TargetPlatform.android) return;
+
+    final notifier = ref.read(ttsProvider.notifier);
+    await notifier.refreshNativeSnapshot();
+    if (!mounted) return;
+
+    final tts = ref.read(ttsProvider);
+    final targetChapterId = tts.contentKey;
+    if (targetChapterId == null || targetChapterId.isEmpty) return;
+    if (targetChapterId == widget.chapterId) return;
+    if (tts.status != TtsStatus.playing && tts.status != TtsStatus.paused) return;
+
+    context.pushReplacement(RouteNames.readerChapter(targetChapterId));
+  }
+
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     _scrollCtrl.addListener(_onScroll);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      unawaited(_reconcileChapterWithNativeTts());
+    });
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      unawaited(_reconcileChapterWithNativeTts());
+    }
   }
 
   /// Handle TTS state transitions that require navigation or restarts.
@@ -336,6 +365,7 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _uiAutoHideTimer?.cancel();
     _scrollCtrl.removeListener(_onScroll);
     _scrollCtrl.dispose();
