@@ -19,17 +19,19 @@ class _SplashScreenState extends ConsumerState<SplashScreen> {
 
   bool _isRestorableRoute(String path) {
     if (path.isEmpty || path == RouteNames.splash) return false;
-    return path == RouteNames.home ||
-        path == RouteNames.login ||
-        path == RouteNames.search ||
-        path.startsWith('${RouteNames.search}?') ||
-        path == RouteNames.genres ||
-        path == RouteNames.bookshelf ||
-        path == RouteNames.profile ||
-        path == RouteNames.settings ||
-        path.startsWith('/novel/') ||
-        path.startsWith('/reader/') ||
-        path.startsWith('/comments/');
+    // Composite "parentPath|deepPath" — validate the deep path portion
+    final checkPath = path.contains('|') ? path.substring(path.indexOf('|') + 1) : path;
+    return checkPath == RouteNames.home ||
+        checkPath == RouteNames.login ||
+        checkPath == RouteNames.search ||
+        checkPath.startsWith('${RouteNames.search}?') ||
+        checkPath == RouteNames.genres ||
+        checkPath == RouteNames.bookshelf ||
+        checkPath == RouteNames.profile ||
+        checkPath == RouteNames.settings ||
+        checkPath.startsWith('/novel/') ||
+        checkPath.startsWith('/reader/') ||
+        checkPath.startsWith('/comments/');
   }
 
   @override
@@ -40,7 +42,34 @@ class _SplashScreenState extends ConsumerState<SplashScreen> {
       final lastPath = await ref.read(localStoreProvider).loadLastRoutePath();
       if (!mounted) return;
       if (lastPath != null && _isRestorableRoute(lastPath)) {
-        context.go(lastPath);
+        if (lastPath.contains('|')) {
+          // Composite "parentPath|deepPath" e.g. "/novel/123|/reader/abc"
+          // Restore full stack: Home → Novel Detail → Reader
+          final sep = lastPath.indexOf('|');
+          final parentPath = lastPath.substring(0, sep);
+          final deepPath = lastPath.substring(sep + 1);
+          context.go(RouteNames.home);
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (!mounted) return;
+            context.push(parentPath);
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (mounted) context.push(deepPath);
+            });
+          });
+        } else {
+          // Single deep route (novel, comments) outside ShellRoute: push on Home
+          final isDeepRoute = lastPath.startsWith('/reader/') ||
+              lastPath.startsWith('/novel/') ||
+              lastPath.startsWith('/comments/');
+          if (isDeepRoute) {
+            context.go(RouteNames.home);
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (mounted) context.push(lastPath);
+            });
+          } else {
+            context.go(lastPath);
+          }
+        }
         return;
       }
       context.go(RouteNames.home);

@@ -24,15 +24,27 @@ class _ReaderAppState extends ConsumerState<ReaderApp> {
   final _scaffoldMessengerKey = GlobalKey<ScaffoldMessengerState>();
   ProviderSubscription<int>? _sessionExpirySub;
   late final GoRouter _router;
+  String? _previousPath;
 
   void _persistRouteForRestore() {
     if (!mounted) return;
-    unawaited(() async {
-      final uri = _router.state.uri;
-      final fullPath = uri.hasQuery ? '${uri.path}?${uri.query}' : uri.path;
-      if (fullPath == RouteNames.splash) return;
-      await ref.read(localStoreProvider).saveLastRoutePath(fullPath);
-    }());
+    final uri = _router.state.uri;
+    final fullPath = uri.hasQuery ? '${uri.path}?${uri.query}' : uri.path;
+    if (fullPath == RouteNames.splash) return;
+
+    // When navigating into reader from a novel page, save "novelPath|readerPath"
+    // so the splash screen can reconstruct the full back stack on restore.
+    final String pathToSave;
+    if (fullPath.startsWith('/reader/') &&
+        _previousPath != null &&
+        _previousPath!.startsWith('/novel/')) {
+      pathToSave = '$_previousPath|$fullPath';
+    } else {
+      pathToSave = fullPath;
+    }
+    _previousPath = fullPath;
+
+    unawaited(ref.read(localStoreProvider).saveLastRoutePath(pathToSave));
   }
 
   @override
