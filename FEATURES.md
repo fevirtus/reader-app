@@ -28,3 +28,7 @@ Trang thai tinh nang mobile `reader-app` theo parity voi web.
 
 - Contract: `reader-app/CONTRACT.md`
 - Mapping: `reader-app/CROSS_REPO_ENDPOINT_MATRIX.md`
+
+## Note
+
+- EPUB import flow is currently MOD-only on web (`reader /mod/import`), not in mobile scope.

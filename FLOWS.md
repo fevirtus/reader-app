@@ -46,3 +46,7 @@ Muc tieu: mobile follow cung business behavior voi web.
 - Recommendation flow (`/api/user/recommendations`)
 - Rating flow (`/api/truyen/{id}/rate`)
 - Search suggest flow (`/api/truyen/suggest`)
+
+## Out of Scope (Current)
+
+- EPUB import flow (`/api/import/*`) is MOD-only on web and not planned for mobile client.
