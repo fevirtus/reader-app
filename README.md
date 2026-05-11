@@ -7,16 +7,11 @@ Flutter mobile app for reading novels, synced with the existing web platform.
 - Full end-user feature parity with the current web app.
 - Excludes all moderator/admin workflows.
 
-## Planned Feature Set
+## Implemented vs planned
 
-- Google login and authenticated user session.
-- Home feed, hot boards, and recommendations.
-- Search with suggestions, genre, status, and sort filters.
-- Novel detail with chapter list and series metadata.
-- Reader with TOC, reading preferences, and progress sync.
-- Bookshelf tabs: Dang doc, Danh dau, Da doc, De cu.
-- Comments, ratings, and user recommendations.
-- Native TTS and offline reading support.
+Đã có trong code (theo `lib/features`): đăng nhập Google, home/browse, genres, tìm kiếm, chi tiết truyện + danh sách chương, reader (kèm TTS), bookshelf, bookmark/progress, bình luận, splash/settings.
+
+Còn thiếu hoặc mới dạng placeholder so với web: gợi ý tìm kiếm (`/api/truyen/suggest`), đánh giá truyện (`/api/truyen/{id}/rate`), đồng bộ settings và đề cử người dùng (`/api/user/settings`, `/api/user/recommendations`). Chi tiết parity xem `FEATURES.md` và `CROSS_REPO_ENDPOINT_MATRIX.md`.
 
 ## Architecture
 
@@ -51,12 +46,14 @@ This script reads `.env.mobile` and automatically passes:
 - `GOOGLE_SERVER_CLIENT_ID`
 - optional `GOOGLE_CLIENT_ID`
 
-Default `BASE_URL` behavior:
+Default `BASE_URL` khi **không** truyền `--dart-define` (xem `lib/core/config/app_config.dart`):
 
-- Android emulator: `http://10.0.2.2:8000`
-- Others (iOS simulator, desktop, web): `http://localhost:8000`
+- Android (native, không phải web build): `https://reader-api.fevirtus.dev`
+- Các nền tảng khác (iOS, desktop, web build, v.v.): `http://localhost:8000`
 
-If needed, you can still override explicitly:
+Để dev local trên Android emulator, luôn set rõ qua `--dart-define` hoặc file `.env.mobile` + `scripts/flutter_run_with_env.sh`, ví dụ `http://10.0.2.2:8000`.
+
+Override trực tiếp:
 
 ```bash
 flutter run --dart-define=BASE_URL=http://localhost:8000

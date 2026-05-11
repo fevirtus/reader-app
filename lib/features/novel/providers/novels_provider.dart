@@ -220,7 +220,7 @@ final chapterListProvider =
   try {
     return await fetchAllChapters(novelId);
   } catch (_) {
-    // Backend stores chapters by novel id in MongoDB; if route opened by slug,
+    // If route opened by slug/id mismatch, resolve canonical novel id and retry once.
     // first request can return empty list. Resolve canonical id and retry once.
     try {
       final novelRes = await client.dio.get('/api/novels/$novelId');

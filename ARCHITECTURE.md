@@ -26,8 +26,8 @@ Tai lieu nay mo ta vai tro `reader-app` trong he sinh thai doc truyen gom web + 
 
 ## Environment va ket noi
 
-- Local API mac dinh: `http://10.0.2.2:8000` (Android emulator).
-- Script `scripts/flutter_run_with_env.sh` la cach chuan de chay local.
+- Khong co `--dart-define`: Android native mac dinh toi `https://reader-api.fevirtus.dev`; cac platform khac `http://localhost:8000` (`lib/core/config/app_config.dart`).
+- Dev local Android emulator: dat `BASE_URL=http://10.0.2.2:8000` trong `.env.mobile` va chay qua `scripts/flutter_run_with_env.sh`.
 - `BASE_URL`, `GOOGLE_SERVER_CLIENT_ID`, `GOOGLE_CLIENT_ID` duoc truyen qua `--dart-define`.
 
 ## Definition of Done (Mobile)

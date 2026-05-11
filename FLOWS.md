@@ -49,4 +49,4 @@ Muc tieu: mobile follow cung business behavior voi web.
 
 ## Out of Scope (Current)
 
-- EPUB import flow (`/api/import/*`) is MOD-only on web and not planned for mobile client.
+- MOD EPUB import chi tren web (`/mod/import`: `/api/mod/epub`, `POST /api/import/uploads/preview`, …). Mobile khong co wizard import.
