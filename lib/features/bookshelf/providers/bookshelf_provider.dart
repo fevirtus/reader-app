@@ -43,19 +43,16 @@ class BookshelfNotifier extends StateNotifier<AsyncValue<List<BookmarkModel>>> {
     final index = current.indexWhere((b) => b.novelId == novelId);
     if (index >= 0) {
       final existing = current[index];
-      final merged = parsedFromServer ?? BookmarkModel(
-        id: existing.id,
-        novelId: existing.novelId,
-        type: BookmarkType.reading,
-        lastChapterId: chapterId,
-        lastChapterNumber: chapterNumber,
-        readChapters: {
-          ...existing.readChapters,
-          chapterNumber,
-        }.toList()
-          ..sort(),
-        novel: existing.novel,
-      );
+      final merged = parsedFromServer ??
+          existing.copyWith(
+            lastChapterId: chapterId,
+            lastChapterNumber: chapterNumber,
+            readChapters: {
+              ...existing.readChapters,
+              chapterNumber,
+            }.toList()
+              ..sort(),
+          );
 
       final updated = [...current]..[index] = merged;
       state = AsyncValue.data(updated);
@@ -72,6 +69,7 @@ class BookshelfNotifier extends StateNotifier<AsyncValue<List<BookmarkModel>>> {
       id: 'progress-$novelId',
       novelId: novelId,
       type: BookmarkType.reading,
+      shelfStatus: ShelfStatus.reading,
       lastChapterId: chapterId,
       lastChapterNumber: chapterNumber,
       readChapters: [chapterNumber],
@@ -101,16 +99,13 @@ class BookshelfNotifier extends StateNotifier<AsyncValue<List<BookmarkModel>>> {
     return (state.valueOrNull ?? []).any((b) => b.novelId == novelId);
   }
 
-  Future<void> removeFromShelf(String novelId, BookmarkType type) async {
+  Future<void> removeFromShelf(String novelId) async {
     try {
       final client = _ref.read(apiClientProvider);
-      await client.dio.delete(
-        '/api/user/bookmarks/$novelId',
-        queryParameters: {'type': type.value},
-      );
+      await client.dio.delete('/api/user/bookmarks/$novelId');
       final current = state.valueOrNull ?? [];
       state = AsyncValue.data(
-        current.where((b) => b.novelId != novelId || b.type != type).toList(),
+        current.where((b) => b.novelId != novelId).toList(),
       );
     } catch (e, st) {
       state = AsyncValue.error(e, st);
@@ -125,12 +120,17 @@ final bookshelfProvider =
 
 final readingBookmarksProvider = Provider<List<BookmarkModel>>((ref) {
   final bookmarks = ref.watch(bookshelfProvider).valueOrNull ?? [];
-  return bookmarks.where((b) => b.type == BookmarkType.reading).toList();
+  return bookmarks.where((b) => b.shelfStatus == ShelfStatus.reading).toList();
 });
 
 final savedBookmarksProvider = Provider<List<BookmarkModel>>((ref) {
   final bookmarks = ref.watch(bookshelfProvider).valueOrNull ?? [];
-  return bookmarks.where((b) => b.type == BookmarkType.bookmarked).toList();
+  return bookmarks.where((b) => b.shelfStatus == ShelfStatus.saved).toList();
+});
+
+final completedBookmarksProvider = Provider<List<BookmarkModel>>((ref) {
+  final bookmarks = ref.watch(bookshelfProvider).valueOrNull ?? [];
+  return bookmarks.where((b) => b.shelfStatus == ShelfStatus.completed).toList();
 });
 
 final isBookmarkedProvider = Provider.family<bool, String>((ref, novelId) {

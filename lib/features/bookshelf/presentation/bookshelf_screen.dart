@@ -51,7 +51,7 @@ class BookshelfScreen extends ConsumerWidget {
 
     return Scaffold(
       body: DefaultTabController(
-        length: 2,
+        length: 3,
         child: Column(
           children: [
             MainAppHeader(
@@ -68,9 +68,12 @@ class BookshelfScreen extends ConsumerWidget {
                   labelColor: Colors.white,
                   unselectedLabelColor: Colors.white70,
                   dividerColor: Colors.transparent,
+                  isScrollable: true,
+                  tabAlignment: TabAlignment.start,
                   tabs: const [
                     Tab(text: 'Đang đọc'),
                     Tab(text: 'Đánh dấu'),
+                    Tab(text: 'Đã đọc'),
                   ],
                 ),
               ),
@@ -95,16 +98,24 @@ class BookshelfScreen extends ConsumerWidget {
                 data: (bookmarks) {
                   final readingItems = ref.watch(readingBookmarksProvider);
                   final bookmarkedItems = ref.watch(savedBookmarksProvider);
+                  final completedItems = ref.watch(completedBookmarksProvider);
 
                   return TabBarView(
                     children: [
                       _BookshelfList(
                         bookmarks: readingItems,
                         emptyLabel: 'Chưa có truyện đang đọc.',
+                        continueLabel: 'Đọc tiếp',
                       ),
                       _BookshelfList(
                         bookmarks: bookmarkedItems,
                         emptyLabel: 'Chưa có truyện đánh dấu.',
+                        continueLabel: 'Đọc',
+                      ),
+                      _BookshelfList(
+                        bookmarks: completedItems,
+                        emptyLabel: 'Chưa có truyện đã đọc xong.',
+                        continueLabel: 'Đọc lại',
                       ),
                     ],
                   );
@@ -119,10 +130,15 @@ class BookshelfScreen extends ConsumerWidget {
 }
 
 class _BookshelfList extends ConsumerWidget {
-  const _BookshelfList({required this.bookmarks, required this.emptyLabel});
+  const _BookshelfList({
+    required this.bookmarks,
+    required this.emptyLabel,
+    required this.continueLabel,
+  });
 
   final List<BookmarkModel> bookmarks;
   final String emptyLabel;
+  final String continueLabel;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -149,9 +165,10 @@ class _BookshelfList extends ConsumerWidget {
           final bookmark = bookmarks[index];
           return _BookmarkTile(
             bookmark: bookmark,
+            continueLabel: continueLabel,
             onRemove: () => ref
                 .read(bookshelfProvider.notifier)
-                .removeFromShelf(bookmark.novelId, bookmark.type),
+                .removeFromShelf(bookmark.novelId),
           );
         },
       ),
@@ -161,9 +178,11 @@ class _BookshelfList extends ConsumerWidget {
 
 class _BookmarkTile extends ConsumerWidget {
   final BookmarkModel bookmark;
+  final String continueLabel;
   final VoidCallback onRemove;
   const _BookmarkTile({
     required this.bookmark,
+    required this.continueLabel,
     required this.onRemove,
   });
 
@@ -259,7 +278,9 @@ class _BookmarkTile extends ConsumerWidget {
                     if (bookmark.lastChapterNumber != null) ...[
                       const SizedBox(height: 6),
                       Text(
-                        'Đang đọc đến: ${bookmark.lastChapterNumber} / ${novel?.totalChapters ?? '--'}',
+                        bookmark.shelfStatus == ShelfStatus.completed
+                            ? 'Đã đọc ${novel?.totalChapters ?? bookmark.lastChapterNumber} chương'
+                            : 'Đang đọc đến: ${bookmark.lastChapterNumber} / ${novel?.totalChapters ?? '--'}',
                         style: Theme.of(context).textTheme.bodyMedium,
                       ),
                     ],
@@ -286,7 +307,7 @@ class _BookmarkTile extends ConsumerWidget {
                 child: FilledButton.icon(
                   onPressed: () => _openContinueReader(context, ref),
                   icon: const Icon(Icons.menu_book_rounded),
-                  label: const Text('Đọc tiếp'),
+                  label: Text(continueLabel),
                   style: FilledButton.styleFrom(
                     backgroundColor: const Color(0xFF14B8A6),
                     foregroundColor: Colors.white,
