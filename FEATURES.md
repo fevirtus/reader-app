@@ -7,21 +7,20 @@ Trang thai tinh nang mobile `reader-app` theo parity voi web.
 | Feature | Status | Notes |
 |---|---|---|
 | Google login | done | Qua `/api/auth/mobile-login` |
-| Home/browse boards | done | `/api/novels/browse` |
+| Home/browse boards | done | Hot, xep hang danh gia/luot doc, truyen moi |
 | Genre list | done | `/api/genres` |
 | Novel detail + chapter list | done | `/api/novels/{idOrSlug}`, `/api/truyen/{id}/chapters` |
 | Reader chapter detail | done | `/api/chapters/{chapterId}` |
-| Bookmark | done | `/api/user/bookmarks` |
+| Bookshelf (dang doc / da doc) | done | 2 tab, khong con kệ danh dau |
+| Mark as read | done | `POST /api/user/bookmarks` action `markAsRead` |
 | Reading progress sync | done | `/api/user/reading-progress` |
-| Comments | done | `/api/truyen/{id}/comments` |
+| Rating | done | `/api/truyen/{id}/rate` thang 1-10 |
 
 ## Parity Gaps
 
 | Feature | Status | Notes |
 |---|---|---|
 | User settings sync | planned | `/api/user/settings` |
-| User recommendations | planned | `/api/user/recommendations` |
-| Rating | planned | `/api/truyen/{id}/rate` |
 | Search suggest | planned | `/api/truyen/suggest` |
 
 ## Dependencies

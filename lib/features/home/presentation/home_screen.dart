@@ -66,10 +66,15 @@ class HomeScreen extends ConsumerWidget {
                     ),
                     _NovelHorizontalList(novels: data.latest),
                     _SectionHeader(
-                      title: 'Đề cử nổi bật',
+                      title: 'Xếp hạng đánh giá',
                       onMore: () => context.go('${RouteNames.search}?sort=rating'),
                     ),
-                    _FeatureGrid(novels: data.topRated.take(6).toList()),
+                    _FeatureGrid(novels: data.topRated.take(6).toList(), metricLabel: 'đánh giá'),
+                    _SectionHeader(
+                      title: 'Xếp hạng lượt đọc',
+                      onMore: () => context.go('${RouteNames.search}?sort=popular'),
+                    ),
+                    _FeatureGrid(novels: data.topViews.take(6).toList(), metricLabel: 'lượt đọc'),
                     const SizedBox(height: 12),
                   ],
                 ),
@@ -414,7 +419,9 @@ class _NovelHorizontalList extends StatelessWidget {
                   ),
                   const SizedBox(height: 3),
                   Text(
-                    '${novel.totalChapters} chương',
+                    novel.latestChapter != null
+                        ? 'Chương ${novel.latestChapter!.number}'
+                        : '${novel.totalChapters} chương',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
@@ -432,9 +439,10 @@ class _NovelHorizontalList extends StatelessWidget {
 }
 
 class _FeatureGrid extends StatelessWidget {
-  const _FeatureGrid({required this.novels});
+  const _FeatureGrid({required this.novels, required this.metricLabel});
 
   final List<NovelModel> novels;
+  final String metricLabel;
 
   @override
   Widget build(BuildContext context) {
@@ -490,7 +498,9 @@ class _FeatureGrid extends StatelessWidget {
                       ),
                 ),
                 Text(
-                  '${novel.bookmarkCount > 0 ? novel.bookmarkCount : novel.views} ${novel.bookmarkCount > 0 ? 'Đề cử/tuần' : 'Lượt xem'}',
+                  metricLabel == 'đánh giá'
+                      ? '${novel.rating.toStringAsFixed(1)}/10'
+                      : '${novel.views} lượt đọc',
                   style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                         color: const Color(0xFF1677FF),
                       ),

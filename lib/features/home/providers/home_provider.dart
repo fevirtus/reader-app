@@ -8,11 +8,13 @@ class HomeData {
   final List<NovelModel> hot;
   final List<NovelModel> latest;
   final List<NovelModel> topRated;
+  final List<NovelModel> topViews;
 
   const HomeData({
     required this.hot,
     required this.latest,
     required this.topRated,
+    required this.topViews,
   });
 }
 
@@ -60,5 +62,6 @@ final homeProvider = FutureProvider<HomeData>((ref) async {
     hot: parseItems(results[0], 'popular'),
     latest: parseItems(results[1], 'latest'),
     topRated: parseItems(results[2], 'rating'),
+    topViews: parseItems(results[0], 'popular').take(10).toList(),
   );
 });

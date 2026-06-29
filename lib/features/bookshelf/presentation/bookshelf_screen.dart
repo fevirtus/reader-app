@@ -51,7 +51,7 @@ class BookshelfScreen extends ConsumerWidget {
 
     return Scaffold(
       body: DefaultTabController(
-        length: 3,
+        length: 2,
         child: Column(
           children: [
             MainAppHeader(
@@ -72,7 +72,6 @@ class BookshelfScreen extends ConsumerWidget {
                   tabAlignment: TabAlignment.start,
                   tabs: const [
                     Tab(text: 'Đang đọc'),
-                    Tab(text: 'Đánh dấu'),
                     Tab(text: 'Đã đọc'),
                   ],
                 ),
@@ -97,7 +96,6 @@ class BookshelfScreen extends ConsumerWidget {
                 ),
                 data: (bookmarks) {
                   final readingItems = ref.watch(readingBookmarksProvider);
-                  final bookmarkedItems = ref.watch(savedBookmarksProvider);
                   final completedItems = ref.watch(completedBookmarksProvider);
 
                   return TabBarView(
@@ -106,16 +104,13 @@ class BookshelfScreen extends ConsumerWidget {
                         bookmarks: readingItems,
                         emptyLabel: 'Chưa có truyện đang đọc.',
                         continueLabel: 'Đọc tiếp',
-                      ),
-                      _BookshelfList(
-                        bookmarks: bookmarkedItems,
-                        emptyLabel: 'Chưa có truyện đánh dấu.',
-                        continueLabel: 'Đọc',
+                        showContinueButton: true,
                       ),
                       _BookshelfList(
                         bookmarks: completedItems,
                         emptyLabel: 'Chưa có truyện đã đọc xong.',
-                        continueLabel: 'Đọc lại',
+                        continueLabel: 'Đã đọc',
+                        showContinueButton: false,
                       ),
                     ],
                   );
@@ -134,11 +129,13 @@ class _BookshelfList extends ConsumerWidget {
     required this.bookmarks,
     required this.emptyLabel,
     required this.continueLabel,
+    required this.showContinueButton,
   });
 
   final List<BookmarkModel> bookmarks;
   final String emptyLabel;
   final String continueLabel;
+  final bool showContinueButton;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -166,6 +163,7 @@ class _BookshelfList extends ConsumerWidget {
           return _BookmarkTile(
             bookmark: bookmark,
             continueLabel: continueLabel,
+            showContinueButton: showContinueButton,
             onRemove: () => ref
                 .read(bookshelfProvider.notifier)
                 .removeFromShelf(bookmark.novelId),
@@ -179,10 +177,12 @@ class _BookshelfList extends ConsumerWidget {
 class _BookmarkTile extends ConsumerWidget {
   final BookmarkModel bookmark;
   final String continueLabel;
+  final bool showContinueButton;
   final VoidCallback onRemove;
   const _BookmarkTile({
     required this.bookmark,
     required this.continueLabel,
+    required this.showContinueButton,
     required this.onRemove,
   });
 
@@ -275,12 +275,18 @@ class _BookmarkTile extends ConsumerWidget {
                             fontWeight: FontWeight.w700,
                           ),
                     ),
-                    if (bookmark.lastChapterNumber != null) ...[
+                    if (bookmark.shelfStatus == ShelfStatus.completed) ...[
                       const SizedBox(height: 6),
                       Text(
-                        bookmark.shelfStatus == ShelfStatus.completed
-                            ? 'Đã đọc ${novel?.totalChapters ?? bookmark.lastChapterNumber} chương'
-                            : 'Đang đọc đến: ${bookmark.lastChapterNumber} / ${novel?.totalChapters ?? '--'}',
+                        bookmark.markedAsRead
+                            ? 'Đánh dấu đã đọc'
+                            : 'Đã đọc ${novel?.totalChapters ?? bookmark.lastChapterNumber} chương',
+                        style: Theme.of(context).textTheme.bodyMedium,
+                      ),
+                    ] else if (bookmark.lastChapterNumber != null) ...[
+                      const SizedBox(height: 6),
+                      Text(
+                        'Đang đọc đến: ${bookmark.lastChapterNumber} / ${novel?.totalChapters ?? '--'}',
                         style: Theme.of(context).textTheme.bodyMedium,
                       ),
                     ],
@@ -300,22 +306,36 @@ class _BookmarkTile extends ConsumerWidget {
               ),
             ],
           ),
-          const SizedBox(height: 14),
-          Row(
-            children: [
-              Expanded(
-                child: FilledButton.icon(
-                  onPressed: () => _openContinueReader(context, ref),
-                  icon: const Icon(Icons.menu_book_rounded),
-                  label: Text(continueLabel),
-                  style: FilledButton.styleFrom(
-                    backgroundColor: const Color(0xFF14B8A6),
-                    foregroundColor: Colors.white,
+          if (showContinueButton) ...[
+            const SizedBox(height: 14),
+            Row(
+              children: [
+                Expanded(
+                  child: FilledButton.icon(
+                    onPressed: () => _openContinueReader(context, ref),
+                    icon: const Icon(Icons.menu_book_rounded),
+                    label: Text(continueLabel),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: const Color(0xFF14B8A6),
+                      foregroundColor: Colors.white,
+                    ),
                   ),
                 ),
-              ),
-            ],
-          ),
+              ],
+            ),
+          ] else ...[
+            const SizedBox(height: 14),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed: null,
+                    child: Text(continueLabel),
+                  ),
+                ),
+              ],
+            ),
+          ],
         ],
       ),
       ),

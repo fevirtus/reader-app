@@ -4,7 +4,6 @@ import 'package:go_router/go_router.dart';
 
 import '../../features/auth/presentation/login_screen.dart';
 import '../../features/bookshelf/presentation/bookshelf_screen.dart';
-import '../../features/comments/presentation/comments_screen.dart';
 import '../../features/genres/presentation/genres_screen.dart';
 import '../../features/home/presentation/home_screen.dart';
 import '../../features/novel/presentation/novel_detail_screen.dart';
@@ -72,13 +71,6 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         path: RouteNames.readerPath,
         builder: (_, state) => ReaderScreen(
           chapterId: Uri.decodeComponent(state.pathParameters['chapterId'] ?? ''),
-        ),
-      ),
-      GoRoute(
-        path: RouteNames.commentsPath,
-        builder: (_, state) => CommentsScreen(
-          novelId: state.pathParameters['novelId'] ?? '',
-          chapterId: state.uri.queryParameters['chapterId'],
         ),
       ),
       GoRoute(

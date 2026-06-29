@@ -30,8 +30,7 @@ class _SplashScreenState extends ConsumerState<SplashScreen> {
         checkPath == RouteNames.profile ||
         checkPath == RouteNames.settings ||
         checkPath.startsWith('/novel/') ||
-        checkPath.startsWith('/reader/') ||
-        checkPath.startsWith('/comments/');
+        checkPath.startsWith('/reader/');
   }
 
   @override
@@ -59,8 +58,7 @@ class _SplashScreenState extends ConsumerState<SplashScreen> {
         } else {
           // Single deep route (novel, comments) outside ShellRoute: push on Home
           final isDeepRoute = lastPath.startsWith('/reader/') ||
-              lastPath.startsWith('/novel/') ||
-              lastPath.startsWith('/comments/');
+              lastPath.startsWith('/novel/');
           if (isDeepRoute) {
             context.go(RouteNames.home);
             WidgetsBinding.instance.addPostFrameCallback((_) {

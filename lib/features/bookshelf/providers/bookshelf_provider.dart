@@ -77,18 +77,27 @@ class BookshelfNotifier extends StateNotifier<AsyncValue<List<BookmarkModel>>> {
     state = AsyncValue.data([synthetic, ...current]);
   }
 
-  Future<void> toggle(String novelId) async {
+  Future<void> markAsRead(String novelId) async {
     try {
       final client = _ref.read(apiClientProvider);
+      final res = await client.dio.post('/api/user/bookmarks', data: {
+        'action': 'markAsRead',
+        'novelId': novelId,
+      });
+      final data = res.data as Map<String, dynamic>;
+      final bookmarkJson = data['bookmark'] as Map<String, dynamic>?;
       final current = state.valueOrNull ?? [];
-      final existing = current.where((b) => b.novelId == novelId).toList();
-      if (existing.isEmpty) {
-        final res = await client.dio.post('/api/user/bookmarks', data: {'novelId': novelId});
-        final updated = BookmarkModel.fromJson(res.data as Map<String, dynamic>);
-        state = AsyncValue.data([...current, updated]);
+      if (bookmarkJson != null) {
+        final updated = BookmarkModel.fromJson(bookmarkJson);
+        final index = current.indexWhere((b) => b.novelId == novelId);
+        if (index >= 0) {
+          final next = [...current]..[index] = updated;
+          state = AsyncValue.data(next);
+        } else {
+          state = AsyncValue.data([updated, ...current]);
+        }
       } else {
-        await client.dio.delete('/api/user/bookmarks/$novelId');
-        state = AsyncValue.data(current.where((b) => b.novelId != novelId).toList());
+        await fetch();
       }
     } catch (e, st) {
       state = AsyncValue.error(e, st);
@@ -121,11 +130,6 @@ final bookshelfProvider =
 final readingBookmarksProvider = Provider<List<BookmarkModel>>((ref) {
   final bookmarks = ref.watch(bookshelfProvider).valueOrNull ?? [];
   return bookmarks.where((b) => b.shelfStatus == ShelfStatus.reading).toList();
-});
-
-final savedBookmarksProvider = Provider<List<BookmarkModel>>((ref) {
-  final bookmarks = ref.watch(bookshelfProvider).valueOrNull ?? [];
-  return bookmarks.where((b) => b.shelfStatus == ShelfStatus.saved).toList();
 });
 
 final completedBookmarksProvider = Provider<List<BookmarkModel>>((ref) {

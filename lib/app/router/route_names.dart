@@ -13,13 +13,8 @@ class RouteNames {
   // Path-param based routes
   static const novelDetailPath = '/novel/:id';
   static const readerPath = '/reader/:chapterId';
-  static const commentsPath = '/comments/:novelId';
 
   // Navigation helpers
   static String novelDetail(String id) => '/novel/$id';
   static String readerChapter(String chapterId) => '/reader/${Uri.encodeComponent(chapterId)}';
-  static String commentsFor(String novelId, {String? chapterId}) {
-    final base = '/comments/$novelId';
-    return chapterId != null ? '$base?chapterId=$chapterId' : base;
-  }
 }

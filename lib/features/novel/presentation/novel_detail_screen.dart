@@ -11,6 +11,7 @@ import '../../../core/models/bookmark_model.dart';
 import '../../../core/models/chapter_model.dart';
 import '../../../core/models/novel_model.dart';
 import '../../../core/storage/local_store.dart';
+import '../../../shared/widgets/star_rating.dart';
 import '../../bookshelf/providers/bookshelf_provider.dart';
 import '../providers/novels_provider.dart';
 
@@ -166,6 +167,7 @@ class _NovelDetailScreenState extends ConsumerState<NovelDetailScreen> {
         final bookmarks = bookshelfAsync.valueOrNull ?? const <BookmarkModel>[];
         final latestBookmark =
             bookmarks.where((b) => b.novelId == novelId).firstOrNull;
+        final completed = latestBookmark?.isCompleted ?? false;
         final progress = readProgressAsync.valueOrNull;
         final continueChapterId =
             latestBookmark?.lastChapterId ?? (progress?['chapterId'] as String?);
@@ -180,14 +182,42 @@ class _NovelDetailScreenState extends ConsumerState<NovelDetailScreen> {
             : 'Đọc từ đầu';
         return Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: FilledButton.icon(
-            onPressed: () =>
-                context.push(RouteNames.readerChapter(targetChapterId)),
-            icon: const Icon(Icons.menu_book),
-            label: Text(buttonLabel),
-            style: FilledButton.styleFrom(
-              minimumSize: const Size.fromHeight(48),
-            ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              if (completed)
+                FilledButton.icon(
+                  onPressed: null,
+                  icon: const Icon(Icons.check_circle_outline),
+                  label: const Text('Đã đọc'),
+                  style: FilledButton.styleFrom(
+                    minimumSize: const Size.fromHeight(48),
+                    disabledBackgroundColor: Theme.of(context).colorScheme.surfaceContainerHighest,
+                    disabledForegroundColor: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+                )
+              else
+                FilledButton.icon(
+                  onPressed: () =>
+                      context.push(RouteNames.readerChapter(targetChapterId)),
+                  icon: const Icon(Icons.menu_book),
+                  label: Text(buttonLabel),
+                  style: FilledButton.styleFrom(
+                    minimumSize: const Size.fromHeight(48),
+                  ),
+                ),
+              if (!completed) ...[
+                const SizedBox(height: 10),
+                OutlinedButton.icon(
+                  onPressed: () => ref.read(bookshelfProvider.notifier).markAsRead(novelId),
+                  icon: const Icon(Icons.check_circle_outline),
+                  label: const Text('Đánh dấu đã đọc'),
+                  style: OutlinedButton.styleFrom(
+                    minimumSize: const Size.fromHeight(44),
+                  ),
+                ),
+              ],
+            ],
           ),
         );
       },
@@ -213,12 +243,12 @@ class _NovelDetailScreenState extends ConsumerState<NovelDetailScreen> {
         case _NovelDetailTab.ratings:
           content = Padding(
             padding: const EdgeInsets.all(16),
-            child: _buildPlaceholderContent(context, 'Đánh giá sẽ được cập nhật sau.'),
-          );
-        case _NovelDetailTab.comments:
-          content = Padding(
-            padding: const EdgeInsets.all(16),
-            child: _buildPlaceholderContent(context, 'Bình luận sẽ được cập nhật sau.'),
+            child: StarRating(
+              novelId: novel.id,
+              rating: novel.rating,
+              ratingCount: novel.ratingCount,
+              interactive: true,
+            ),
           );
         case _NovelDetailTab.chapters:
           content = const SizedBox.shrink();
@@ -471,7 +501,7 @@ class _NovelDetailScreenState extends ConsumerState<NovelDetailScreen> {
   }
 }
 
-enum _NovelDetailTab { intro, ratings, chapters, comments }
+enum _NovelDetailTab { intro, ratings, chapters }
 
 class _DetailTabs extends StatelessWidget {
   const _DetailTabs({required this.selectedTab, required this.onChanged});
@@ -485,7 +515,6 @@ class _DetailTabs extends StatelessWidget {
       (_NovelDetailTab.intro, 'Giới thiệu'),
       (_NovelDetailTab.ratings, 'Đánh giá'),
       (_NovelDetailTab.chapters, 'Chương'),
-      (_NovelDetailTab.comments, 'Bình luận'),
     ];
 
     return Row(

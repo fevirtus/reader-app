@@ -42,6 +42,7 @@ class BookmarkModel extends Equatable {
     this.lastChapterId,
     this.lastChapterNumber,
     this.readChapters = const [],
+    this.markedAsRead = false,
     this.novel,
   });
 
@@ -52,6 +53,7 @@ class BookmarkModel extends Equatable {
   final String? lastChapterId;
   final int? lastChapterNumber;
   final List<int> readChapters;
+  final bool markedAsRead;
   final NovelModel? novel;
 
   static ShelfStatus resolveShelfStatus({
@@ -59,11 +61,16 @@ class BookmarkModel extends Equatable {
     int? lastChapterNumber,
     List<int> readChapters = const [],
     int? totalChapters,
+    bool markedAsRead = false,
   }) {
     if (explicitShelfStatus == 'reading' ||
         explicitShelfStatus == 'completed' ||
         explicitShelfStatus == 'saved') {
       return ShelfStatus.fromString(explicitShelfStatus);
+    }
+
+    if (markedAsRead) {
+      return ShelfStatus.completed;
     }
 
     final hasProgress = lastChapterNumber != null || readChapters.isNotEmpty;
@@ -80,12 +87,15 @@ class BookmarkModel extends Equatable {
     return ShelfStatus.saved;
   }
 
+  bool get isCompleted => shelfStatus == ShelfStatus.completed;
+
   factory BookmarkModel.fromJson(Map<String, dynamic> json) {
     final lastChapterNumber = (json['lastChapterNumber'] as num?)?.toInt();
     final readChapters = (json['readChapters'] as List<dynamic>?)
             ?.map((e) => (e as num).toInt())
             .toList() ??
         const <int>[];
+    final markedAsRead = json['markedAsRead'] == true;
     final novel = json['novel'] != null
         ? NovelModel.fromJson(json['novel'] as Map<String, dynamic>)
         : null;
@@ -94,6 +104,7 @@ class BookmarkModel extends Equatable {
       lastChapterNumber: lastChapterNumber,
       readChapters: readChapters,
       totalChapters: novel?.totalChapters,
+      markedAsRead: markedAsRead,
     );
 
     return BookmarkModel(
@@ -102,6 +113,7 @@ class BookmarkModel extends Equatable {
       lastChapterId: json['lastChapterId'] as String?,
       lastChapterNumber: lastChapterNumber,
       readChapters: readChapters,
+      markedAsRead: markedAsRead,
       shelfStatus: shelfStatus,
       type: () {
         final explicitType = BookmarkType.fromString(json['type'] as String?);
@@ -123,16 +135,19 @@ class BookmarkModel extends Equatable {
     List<int>? readChapters,
     ShelfStatus? shelfStatus,
     BookmarkType? type,
+    bool? markedAsRead,
     NovelModel? novel,
   }) {
     final mergedReadChapters = readChapters ?? this.readChapters;
     final mergedLastChapterNumber = lastChapterNumber ?? this.lastChapterNumber;
     final mergedNovel = novel ?? this.novel;
+    final mergedMarkedAsRead = markedAsRead ?? this.markedAsRead;
     final mergedShelfStatus = shelfStatus ??
         resolveShelfStatus(
           lastChapterNumber: mergedLastChapterNumber,
           readChapters: mergedReadChapters,
           totalChapters: mergedNovel?.totalChapters,
+          markedAsRead: mergedMarkedAsRead,
         );
 
     return BookmarkModel(
@@ -141,6 +156,7 @@ class BookmarkModel extends Equatable {
       lastChapterId: lastChapterId ?? this.lastChapterId,
       lastChapterNumber: mergedLastChapterNumber,
       readChapters: mergedReadChapters,
+      markedAsRead: mergedMarkedAsRead,
       shelfStatus: mergedShelfStatus,
       type: type ??
           (mergedShelfStatus == ShelfStatus.saved
@@ -151,5 +167,5 @@ class BookmarkModel extends Equatable {
   }
 
   @override
-  List<Object?> get props => [id, novelId, type, shelfStatus];
+  List<Object?> get props => [id, novelId, type, shelfStatus, markedAsRead];
 }

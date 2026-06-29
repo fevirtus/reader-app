@@ -135,9 +135,11 @@ class LatestChapterInfo extends Equatable {
   final DateTime createdAt;
 
   factory LatestChapterInfo.fromJson(Map<String, dynamic> json) => LatestChapterInfo(
-        number: (json['number'] as num).toInt(),
-        title: json['title'] as String,
-        createdAt: DateTime.parse(json['createdAt'] as String),
+        number: (json['number'] as num?)?.toInt() ?? 0,
+        title: (json['title'] as String?) ?? '',
+        createdAt: json['createdAt'] != null
+            ? DateTime.tryParse(json['createdAt'] as String) ?? DateTime.now()
+            : DateTime.now(),
       );
 
   @override
