@@ -9,12 +9,14 @@ class StarRating extends ConsumerStatefulWidget {
     required this.novelId,
     required this.rating,
     required this.ratingCount,
+    this.userRating,
     this.interactive = false,
   });
 
   final String novelId;
   final double rating;
   final int ratingCount;
+  final double? userRating;
   final bool interactive;
 
   @override
@@ -22,26 +24,48 @@ class StarRating extends ConsumerStatefulWidget {
 }
 
 class _StarRatingState extends ConsumerState<StarRating> {
-  late double _currentRating;
-  late int _currentCount;
+  late double _averageRating;
+  late int _ratingCount;
+  double? _userRating;
   double _previewScore = 0;
   bool _submitting = false;
 
   @override
   void initState() {
     super.initState();
-    _currentRating = widget.rating;
-    _currentCount = widget.ratingCount;
+    _averageRating = widget.rating;
+    _ratingCount = widget.ratingCount;
+    _userRating = widget.userRating;
+    if (widget.interactive && widget.userRating == null) {
+      Future.microtask(_loadUserRating);
+    }
   }
 
   @override
   void didUpdateWidget(covariant StarRating oldWidget) {
     super.didUpdateWidget(oldWidget);
-    _currentRating = widget.rating;
-    _currentCount = widget.ratingCount;
+    _averageRating = widget.rating;
+    _ratingCount = widget.ratingCount;
+    if (widget.userRating != null) {
+      _userRating = widget.userRating;
+    }
   }
 
-  double get _displayRating => _previewScore > 0 ? _previewScore : _currentRating;
+  Future<void> _loadUserRating() async {
+    try {
+      final client = ref.read(apiClientProvider);
+      final res = await client.dio.get('/api/truyen/${widget.novelId}/rate');
+      final data = res.data as Map<String, dynamic>;
+      final score = (data['userRating'] as num?)?.toDouble();
+      if (mounted && score != null) {
+        setState(() => _userRating = score);
+      }
+    } catch (_) {
+      // User may not be logged in.
+    }
+  }
+
+  double get _displayRating => _previewScore > 0 ? _previewScore : (_userRating ?? 0);
 
   Future<void> _submit(double score) async {
     if (!widget.interactive || _submitting) return;
@@ -54,8 +78,9 @@ class _StarRatingState extends ConsumerState<StarRating> {
       );
       final data = res.data as Map<String, dynamic>;
       setState(() {
-        _currentRating = (data['rating'] as num?)?.toDouble() ?? score;
-        _currentCount = (data['ratingCount'] as num?)?.toInt() ?? _currentCount + 1;
+        _averageRating = (data['rating'] as num?)?.toDouble() ?? _averageRating;
+        _ratingCount = (data['ratingCount'] as num?)?.toInt() ?? _ratingCount;
+        _userRating = (data['userRating'] as num?)?.toDouble() ?? score;
         _previewScore = 0;
       });
     } finally {
@@ -65,48 +90,53 @@ class _StarRatingState extends ConsumerState<StarRating> {
 
   @override
   Widget build(BuildContext context) {
-    return Row(
+    return Wrap(
+      crossAxisAlignment: WrapCrossAlignment.center,
+      spacing: 8,
+      runSpacing: 4,
       children: [
-        ...List.generate(5, (index) {
-          final star = index + 1;
-          final fill = () {
-            final threshold = star * 2;
-            if (_displayRating >= threshold) return 1.0;
-            if (_displayRating >= threshold - 1) return 0.5;
-            return 0.0;
-          }();
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          children: List.generate(5, (index) {
+            final star = index + 1;
+            final fill = () {
+              final threshold = star * 2;
+              if (_displayRating >= threshold) return 1.0;
+              if (_displayRating >= threshold - 1) return 0.5;
+              return 0.0;
+            }();
 
-          return SizedBox(
-            width: 28,
-            height: 28,
-            child: widget.interactive && !_submitting
-                ? GestureDetector(
-                    behavior: HitTestBehavior.opaque,
-                    onTapUp: (details) {
-                      final isLeftHalf = details.localPosition.dx < 14;
-                      final score = isLeftHalf ? star * 2 - 1 : star * 2;
-                      _submit(score.toDouble());
-                    },
-                    onPanUpdate: (details) {
-                      final isLeftHalf = details.localPosition.dx < 14;
-                      setState(() {
-                        _previewScore = (isLeftHalf ? star * 2 - 1 : star * 2).toDouble();
-                      });
-                    },
-                    onPanEnd: (_) => setState(() => _previewScore = 0),
-                    child: _StarIcon(fill: fill),
-                  )
-                : _StarIcon(fill: fill),
-          );
-        }),
-        const SizedBox(width: 8),
-        Text(
-          '${_currentRating.toStringAsFixed(1)}/10',
-          style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
+            return SizedBox(
+              width: 28,
+              height: 28,
+              child: widget.interactive && !_submitting
+                  ? GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onTapUp: (details) {
+                        final isLeftHalf = details.localPosition.dx < 14;
+                        final score = isLeftHalf ? star * 2 - 1 : star * 2;
+                        _submit(score.toDouble());
+                      },
+                      onPanUpdate: (details) {
+                        final isLeftHalf = details.localPosition.dx < 14;
+                        setState(() {
+                          _previewScore = (isLeftHalf ? star * 2 - 1 : star * 2).toDouble();
+                        });
+                      },
+                      onPanEnd: (_) => setState(() => _previewScore = 0),
+                      child: _StarIcon(fill: fill),
+                    )
+                  : _StarIcon(fill: fill),
+            );
+          }),
         ),
-        const SizedBox(width: 4),
+        if (_userRating != null)
+          Text(
+            'Bạn: ${_userRating!.toStringAsFixed(1)}/10',
+            style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
+          ),
         Text(
-          '($_currentCount đánh giá)',
+          'TB: ${_averageRating.toStringAsFixed(1)}/10 ($_ratingCount người)',
           style: Theme.of(context).textTheme.bodySmall,
         ),
       ],
@@ -122,30 +152,16 @@ class _StarIcon extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Stack(
-      alignment: Alignment.centerLeft,
       children: [
-        const Icon(Icons.star_border, size: 22, color: Colors.grey),
+        Icon(Icons.star_border, size: 24, color: Theme.of(context).colorScheme.outline),
         ClipRect(
-          clipper: _StarClipper(fill),
-          child: Icon(
-            Icons.star,
-            size: 22,
-            color: Theme.of(context).colorScheme.primary,
+          child: Align(
+            alignment: Alignment.centerLeft,
+            widthFactor: fill,
+            child: Icon(Icons.star, size: 24, color: Theme.of(context).colorScheme.primary),
           ),
         ),
       ],
     );
   }
-}
-
-class _StarClipper extends CustomClipper<Rect> {
-  _StarClipper(this.fill);
-
-  final double fill;
-
-  @override
-  Rect getClip(Size size) => Rect.fromLTWH(0, 0, size.width * fill, size.height);
-
-  @override
-  bool shouldReclip(covariant _StarClipper oldClipper) => oldClipper.fill != fill;
 }

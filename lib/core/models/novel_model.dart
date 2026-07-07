@@ -15,6 +15,7 @@ class NovelModel extends Equatable {
     this.views = 0,
     this.rating = 0,
     this.ratingCount = 0,
+    this.userRating,
     this.bookmarkCount = 0,
     this.genres = const [],
     this.seriesId,
@@ -35,6 +36,7 @@ class NovelModel extends Equatable {
   final int views;
   final double rating;
   final int ratingCount;
+  final double? userRating;
   final int bookmarkCount;
   final List<GenreModel> genres;
   final String? seriesId;
@@ -66,6 +68,7 @@ class NovelModel extends Equatable {
         views: (json['views'] as num?)?.toInt() ?? 0,
         rating: (json['rating'] as num?)?.toDouble() ?? 0,
         ratingCount: (json['ratingCount'] as num?)?.toInt() ?? 0,
+        userRating: (json['userRating'] as num?)?.toDouble(),
         bookmarkCount: (json['bookmarkCount'] as num?)?.toInt() ?? 0,
         genres: (json['genres'] as List<dynamic>?)
                 ?.map((g) => GenreModel.fromJson(g as Map<String, dynamic>))

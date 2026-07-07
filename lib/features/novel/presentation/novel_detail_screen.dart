@@ -247,6 +247,7 @@ class _NovelDetailScreenState extends ConsumerState<NovelDetailScreen> {
               novelId: novel.id,
               rating: novel.rating,
               ratingCount: novel.ratingCount,
+              userRating: novel.userRating,
               interactive: true,
             ),
           );
