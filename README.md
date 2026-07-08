@@ -4,6 +4,7 @@ Flutter mobile app for reading novels, synced with the existing web platform.
 
 ## Scope
 
+
 - Full end-user feature parity with the current web app.
 - Excludes all moderator/admin workflows.
 
