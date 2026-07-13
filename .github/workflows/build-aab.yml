@@ -13,12 +13,13 @@ on:
 jobs:
   build-aab:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
 
     env:
       BASE_URL: ${{ secrets.BASE_URL }}
       GOOGLE_SERVER_CLIENT_ID: ${{ secrets.GOOGLE_SERVER_CLIENT_ID }}
       GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
-      TOKEN: ${{ secrets.TOKEN }}
       RELEASE_TAG: ""
       ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
       ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
@@ -66,9 +67,6 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
-      - name: Install release tooling
-        run: sudo apt-get update && sudo apt-get install -y jq
-
       - name: Resolve release tag input
         run: |
           RESOLVED_TAG=""
@@ -81,6 +79,8 @@ jobs:
 
           echo "RELEASE_TAG=${RESOLVED_TAG}" >> "$GITHUB_ENV"
           echo "Resolved RELEASE_TAG=${RESOLVED_TAG:-<empty>}"
+        env:
+          INPUT_RELEASE_TAG: ${{ github.event.inputs.release_tag }}
 
       - name: Prepare Android release signing
         run: |
@@ -184,53 +184,17 @@ jobs:
             fi
           fi
 
-      - name: Create or update Gitea release and upload AAB
+      - name: Rename AAB for release
+        if: env.RELEASE_TAG != ''
         run: |
-          if [ -z "${RELEASE_TAG}" ]; then
-            echo "No release_tag provided. Build completed without creating a release."
-            exit 0
-          fi
+          cp build/app/outputs/bundle/release/app-release.aab "reader-app-${RELEASE_TAG}.aab"
 
-          if [ -z "${TOKEN}" ]; then
-            echo "Missing required secret: TOKEN"
-            exit 1
-          fi
-
-          AAB_PATH="build/app/outputs/bundle/release/app-release.aab"
-          if [ ! -f "$AAB_PATH" ]; then
-            echo "AAB not found at $AAB_PATH"
-            exit 1
-          fi
-
-          OWNER_REPO="${GITHUB_REPOSITORY}"
-          OWNER="${OWNER_REPO%%/*}"
-          REPO="${OWNER_REPO##*/}"
-          TAG="${RELEASE_TAG}"
-          API_BASE="${GITHUB_SERVER_URL}/api/v1"
-
-          RELEASE_JSON=$(curl -sS -X POST \
-            -H "Authorization: token ${TOKEN}" \
-            -H "Content-Type: application/json" \
-            "${API_BASE}/repos/${OWNER}/${REPO}/releases" \
-            -d "{\"tag_name\":\"${TAG}\",\"name\":\"${TAG}\",\"draft\":false,\"prerelease\":false}" \
-            || true)
-
-          RELEASE_ID=$(echo "$RELEASE_JSON" | jq -r '.id // empty')
-
-          if [ -z "$RELEASE_ID" ]; then
-            RELEASE_JSON=$(curl -sS \
-              -H "Authorization: token ${TOKEN}" \
-              "${API_BASE}/repos/${OWNER}/${REPO}/releases/tags/${TAG}")
-            RELEASE_ID=$(echo "$RELEASE_JSON" | jq -r '.id // empty')
-          fi
-
-          if [ -z "$RELEASE_ID" ]; then
-            echo "Could not resolve release ID for tag ${TAG}"
-            echo "$RELEASE_JSON"
-            exit 1
-          fi
-
-          curl -sS -X POST \
-            -H "Authorization: token ${TOKEN}" \
-            -F "attachment=@${AAB_PATH}" \
-            "${API_BASE}/repos/${OWNER}/${REPO}/releases/${RELEASE_ID}/assets?name=reader-app-${TAG}.aab"
+      - name: Create GitHub release and upload AAB
+        if: env.RELEASE_TAG != ''
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          name: ${{ env.RELEASE_TAG }}
+          files: reader-app-${{ env.RELEASE_TAG }}.aab
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
