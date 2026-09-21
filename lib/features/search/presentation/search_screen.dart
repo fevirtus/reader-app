@@ -6,6 +6,9 @@ import 'package:go_router/go_router.dart';
 
 import '../../../app/router/route_names.dart';
 import '../../../core/models/novel_model.dart';
+import '../../../core/theme/app_spacing.dart';
+import '../../../shared/widgets/empty_state.dart';
+import '../../../shared/widgets/status_pill.dart';
 import '../../novel/providers/novels_provider.dart';
 import '../../genres/providers/genres_provider.dart';
 
@@ -103,6 +106,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
   }
 
   void _onQueryChanged(String value) {
+    setState(() {}); // refresh clear button visibility
     _debounce?.cancel();
     _debounce = Timer(const Duration(milliseconds: 500), _applyFilters);
   }
@@ -118,46 +122,48 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
         );
   }
 
+  bool get _hasActiveFilters => _selectedGenre != null || _selectedStatus != null || _sort != 'latest';
+
   @override
   Widget build(BuildContext context) {
-    final genresAsync = ref.watch(genresProvider);
+    final genresAsync = ref.watch(genresListProvider);
+    ref.watch(genresSyncProvider);
     final novelsAsync = ref.watch(novelsProvider);
+    final colorScheme = Theme.of(context).colorScheme;
 
     return Scaffold(
       appBar: AppBar(title: const Text('Tìm kiếm')),
       body: Column(
         children: [
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            padding: const EdgeInsets.fromLTRB(AppSpacing.lg, AppSpacing.sm, AppSpacing.lg, AppSpacing.sm),
             child: TextField(
               controller: _controller,
+              autofocus: widget.initialQuery == null,
               onChanged: _onQueryChanged,
               decoration: InputDecoration(
                 hintText: 'Tên truyện, tác giả...',
-                prefixIcon: const Icon(Icons.search),
+                prefixIcon: const Icon(Icons.search_rounded),
                 suffixIcon: _controller.text.isNotEmpty
                     ? IconButton(
-                        icon: const Icon(Icons.clear),
+                        icon: const Icon(Icons.clear_rounded),
                         onPressed: () {
                           _controller.clear();
                           _applyFilters();
+                          setState(() {});
                         },
                       )
                     : null,
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                isDense: true,
               ),
               textInputAction: TextInputAction.search,
               onSubmitted: (_) => _applyFilters(),
             ),
           ),
-          // Filter chips row
           SingleChildScrollView(
             scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.symmetric(horizontal: 12),
+            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
             child: Row(
               children: [
-                // Genre filter
                 genresAsync.when(
                   loading: () => const SizedBox.shrink(),
                   error: (_, error) => const SizedBox.shrink(),
@@ -179,8 +185,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
                     },
                   ),
                 ),
-                const SizedBox(width: 8),
-                // Status filter
+                const SizedBox(width: AppSpacing.sm),
                 _FilterChipDropdown(
                   label: _selectedStatus == null
                       ? 'Trạng thái'
@@ -198,8 +203,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
                     _applyFilters();
                   },
                 ),
-                const SizedBox(width: 8),
-                // Sort
+                const SizedBox(width: AppSpacing.sm),
                 _FilterChipDropdown(
                   label: _sorts.firstWhere((s) => s.$2 == _sort).$1,
                   selected: _sort != 'latest',
@@ -214,37 +218,66 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
                   },
                   onClear: null,
                 ),
+                if (_hasActiveFilters) ...[
+                  const SizedBox(width: AppSpacing.sm),
+                  TextButton(
+                    onPressed: () {
+                      setState(() {
+                        _selectedGenre = null;
+                        _selectedStatus = null;
+                        _sort = 'latest';
+                      });
+                      _applyFilters();
+                    },
+                    child: const Text('Xoá lọc'),
+                  ),
+                ],
               ],
             ),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: AppSpacing.sm),
           Expanded(
             child: novelsAsync.when(
-              loading: () => const Center(child: CircularProgressIndicator()),
-              error: (e, _) => Center(child: Text('Lỗi: $e')),
+              loading: () => ListView.builder(
+                padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
+                itemCount: 6,
+                itemBuilder: (context, index) => const _SearchTileSkeleton(),
+              ),
+              error: (e, _) => EmptyState(
+                icon: Icons.cloud_off_rounded,
+                title: 'Không thể tải kết quả',
+                subtitle: '$e',
+                actionLabel: 'Thử lại',
+                onAction: _applyFilters,
+              ),
               data: (result) {
                 if (result.items.isEmpty) {
-                  return const Center(child: Text('Không tìm thấy truyện'));
+                  return const EmptyState(
+                    icon: Icons.search_off_rounded,
+                    title: 'Không tìm thấy truyện',
+                    subtitle: 'Thử từ khoá khác hoặc bỏ bớt bộ lọc',
+                  );
                 }
-                return ListView.builder(
+                return ListView.separated(
                   controller: _scrollController,
+                  padding: const EdgeInsets.fromLTRB(AppSpacing.lg, AppSpacing.xs, AppSpacing.lg, AppSpacing.lg),
                   itemCount: result.items.length + (result.hasMore || result.isLoadingMore ? 1 : 0),
+                  separatorBuilder: (_, _) => const SizedBox(height: AppSpacing.sm),
                   itemBuilder: (context, index) {
                     if (index >= result.items.length) {
                       if (result.isLoadingMore) {
                         return const Padding(
-                          padding: EdgeInsets.symmetric(vertical: 16),
+                          padding: EdgeInsets.symmetric(vertical: AppSpacing.lg),
                           child: Center(child: CircularProgressIndicator()),
                         );
                       }
-                      // Trigger page load when user reaches the end.
                       WidgetsBinding.instance.addPostFrameCallback((_) {
                         if (!mounted) return;
                         ref.read(novelsProvider.notifier).loadNextPage();
                       });
                       return const SizedBox(height: 32);
                     }
-                    return _NovelListTile(novel: result.items[index]);
+                    return _NovelResultTile(novel: result.items[index]);
                   },
                 );
               },
@@ -252,6 +285,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
           ),
         ],
       ),
+      backgroundColor: colorScheme.surface,
     );
   }
 }
@@ -289,45 +323,118 @@ class _FilterChipDropdown extends StatelessWidget {
   }
 }
 
-class _NovelListTile extends StatelessWidget {
+class _NovelResultTile extends StatelessWidget {
   final NovelModel novel;
-  const _NovelListTile({required this.novel});
+  const _NovelResultTile({required this.novel});
 
   @override
   Widget build(BuildContext context) {
-    return ListTile(
-      leading: ClipRRect(
-        borderRadius: BorderRadius.circular(6),
-        child: novel.coverUrl != null
-            ? CachedNetworkImage(
-                imageUrl: novel.coverUrl!,
-                width: 44,
-                height: 60,
-                fit: BoxFit.cover,
-              )
-            : Container(
-                width: 44,
-                height: 60,
-                color: Theme.of(context).colorScheme.primaryContainer,
-                child: const Icon(Icons.menu_book, size: 20),
-              ),
-      ),
-      title: Text(novel.title, maxLines: 1, overflow: TextOverflow.ellipsis),
-      subtitle: Text(
-        novel.authorName,
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-      ),
-      trailing: novel.rating > 0
-          ? Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Icon(Icons.star, size: 14, color: Colors.amber),
-                Text(novel.rating.toStringAsFixed(1)),
-              ],
-            )
-          : null,
+    final colorScheme = Theme.of(context).colorScheme;
+    final isCompleted = novel.status.toLowerCase().contains('hoàn');
+
+    return InkWell(
+      borderRadius: BorderRadius.circular(AppRadius.lg),
       onTap: () => context.push(RouteNames.novelDetail(novel.id)),
+      child: Container(
+        padding: const EdgeInsets.all(AppSpacing.sm),
+        decoration: BoxDecoration(
+          color: colorScheme.surfaceContainerLow,
+          borderRadius: BorderRadius.circular(AppRadius.lg),
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(AppRadius.sm),
+              child: novel.coverUrl != null
+                  ? CachedNetworkImage(
+                      imageUrl: novel.coverUrl!,
+                      width: 56,
+                      height: 76,
+                      fit: BoxFit.cover,
+                    )
+                  : Container(
+                      width: 56,
+                      height: 76,
+                      color: colorScheme.primaryContainer,
+                      child: const Icon(Icons.menu_book, size: 20),
+                    ),
+            ),
+            const SizedBox(width: AppSpacing.md),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    novel.title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.titleSmall,
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    novel.authorName,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: colorScheme.onSurfaceVariant,
+                        ),
+                  ),
+                  const SizedBox(height: AppSpacing.xs),
+                  Row(
+                    children: [
+                      StatusPill(
+                        label: novel.status,
+                        tone: isCompleted ? StatusPillTone.success : StatusPillTone.neutral,
+                      ),
+                      const SizedBox(width: AppSpacing.sm),
+                      if (novel.rating > 0) ...[
+                        Icon(Icons.star_rounded, size: 14, color: colorScheme.onSurfaceVariant),
+                        const SizedBox(width: 2),
+                        Text(
+                          novel.rating.toStringAsFixed(1),
+                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                color: colorScheme.onSurfaceVariant,
+                              ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _SearchTileSkeleton extends StatelessWidget {
+  const _SearchTileSkeleton();
+
+  @override
+  Widget build(BuildContext context) {
+    final base = Theme.of(context).colorScheme.surfaceContainerLow;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+      child: Container(
+        height: 92,
+        padding: const EdgeInsets.all(AppSpacing.sm),
+        decoration: BoxDecoration(color: base, borderRadius: BorderRadius.circular(AppRadius.lg)),
+        child: Row(
+          children: [
+            Container(
+              width: 56,
+              height: 76,
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.surfaceContainerHigh,
+                borderRadius: BorderRadius.circular(AppRadius.sm),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

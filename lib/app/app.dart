@@ -10,6 +10,7 @@ import '../core/theme/app_theme.dart';
 import '../core/storage/local_store.dart';
 import '../features/auth/providers/auth_provider.dart';
 import '../features/reader/tts/tts_service.dart';
+import '../shared/widgets/offline_banner.dart';
 import 'router/route_names.dart';
 import 'router/app_router.dart';
 
@@ -138,6 +139,7 @@ class _ReaderAppState extends ConsumerState<ReaderApp> {
       darkTheme: AppTheme.darkTheme,
       themeMode: ThemeMode.system,
       routerConfig: router,
+      builder: (context, child) => OfflineBanner(child: child ?? const SizedBox.shrink()),
     );
   }
 }

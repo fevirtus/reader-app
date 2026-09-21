@@ -5,7 +5,9 @@ import 'package:go_router/go_router.dart';
 
 import '../../../app/router/route_names.dart';
 import '../../../core/models/bookmark_model.dart';
+import '../../../shared/widgets/empty_state.dart';
 import '../../../shared/widgets/main_app_header.dart';
+import '../../downloads/presentation/downloads_tab.dart';
 import '../../novel/providers/novels_provider.dart';
 import '../providers/bookshelf_provider.dart';
 import '../../auth/providers/auth_provider.dart';
@@ -16,42 +18,13 @@ class BookshelfScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final isAuth = ref.watch(isAuthenticatedProvider);
+    final colorScheme = Theme.of(context).colorScheme;
 
-    if (!isAuth) {
-      return Scaffold(
-        body: Column(
-          children: [
-            const MainAppHeader(title: 'Đăng truyện'),
-            Expanded(
-              child: Center(
-                child: Padding(
-                  padding: const EdgeInsets.all(24),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Icon(Icons.lock_outline_rounded, size: 54),
-                      const SizedBox(height: 12),
-                      const Text('Vui lòng đăng nhập để xem tủ sách'),
-                      const SizedBox(height: 16),
-                      FilledButton(
-                        onPressed: () => ref.read(authProvider.notifier).signInWithGoogle(),
-                        child: const Text('Đăng nhập bằng Google'),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          ],
-        ),
-      );
-    }
-
-    final bookshelfAsync = ref.watch(bookshelfProvider);
-
+    // "Đã tải" là dữ liệu cục bộ trên máy, không cần đăng nhập để xem/quản lý —
+    // nên tab bar luôn hiển thị, chỉ 2 tab đầu (gắn với tài khoản) mới yêu cầu đăng nhập.
     return Scaffold(
       body: DefaultTabController(
-        length: 2,
+        length: 3,
         child: Column(
           children: [
             MainAppHeader(
@@ -59,67 +32,90 @@ class BookshelfScreen extends ConsumerWidget {
               bottom: Container(
                 height: 42,
                 decoration: BoxDecoration(
-                  color: const Color(0xFF14B8A6),
-                  borderRadius: BorderRadius.circular(0),
+                  color: colorScheme.surface,
+                  border: Border(bottom: BorderSide(color: colorScheme.outlineVariant)),
                 ),
                 child: TabBar(
-                  indicatorColor: const Color(0xFFF7B500),
-                  indicatorWeight: 3,
-                  labelColor: Colors.white,
-                  unselectedLabelColor: Colors.white70,
+                  indicatorColor: colorScheme.primary,
+                  indicatorWeight: 2.5,
+                  labelColor: colorScheme.primary,
+                  unselectedLabelColor: colorScheme.onSurfaceVariant,
                   dividerColor: Colors.transparent,
                   isScrollable: true,
                   tabAlignment: TabAlignment.start,
+                  labelStyle: Theme.of(context).textTheme.titleSmall,
+                  unselectedLabelStyle: Theme.of(context).textTheme.titleSmall,
                   tabs: const [
                     Tab(text: 'Đang đọc'),
                     Tab(text: 'Đã đọc'),
+                    Tab(text: 'Đã tải'),
                   ],
                 ),
               ),
             ),
             Expanded(
-              child: bookshelfAsync.when(
-                loading: () => const Center(child: CircularProgressIndicator()),
-                error: (e, _) => Center(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Icon(Icons.error_outline_rounded, size: 48),
-                      const SizedBox(height: 8),
-                      Text('Lỗi: $e'),
-                      TextButton(
-                        onPressed: () => ref.read(bookshelfProvider.notifier).fetch(),
-                        child: const Text('Thử lại'),
-                      ),
-                    ],
+              child: TabBarView(
+                children: [
+                  _AuthGatedBookshelfList(
+                    isAuth: isAuth,
+                    shelfStatus: ShelfStatus.reading,
                   ),
-                ),
-                data: (bookmarks) {
-                  final readingItems = ref.watch(readingBookmarksProvider);
-                  final completedItems = ref.watch(completedBookmarksProvider);
-
-                  return TabBarView(
-                    children: [
-                      _BookshelfList(
-                        bookmarks: readingItems,
-                        emptyLabel: 'Chưa có truyện đang đọc.',
-                        continueLabel: 'Đọc tiếp',
-                        showContinueButton: true,
-                      ),
-                      _BookshelfList(
-                        bookmarks: completedItems,
-                        emptyLabel: 'Chưa có truyện đã đọc xong.',
-                        continueLabel: 'Đã đọc',
-                        showContinueButton: false,
-                      ),
-                    ],
-                  );
-                },
+                  _AuthGatedBookshelfList(
+                    isAuth: isAuth,
+                    shelfStatus: ShelfStatus.completed,
+                  ),
+                  const DownloadsTab(),
+                ],
               ),
             ),
           ],
         ),
       ),
+    );
+  }
+}
+
+class _AuthGatedBookshelfList extends ConsumerWidget {
+  const _AuthGatedBookshelfList({required this.isAuth, required this.shelfStatus});
+
+  final bool isAuth;
+  final ShelfStatus shelfStatus;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    if (!isAuth) {
+      return EmptyState(
+        icon: Icons.lock_outline_rounded,
+        title: 'Vui lòng đăng nhập để xem tủ sách',
+        actionLabel: 'Đăng nhập bằng Google',
+        onAction: () => ref.read(authProvider.notifier).signInWithGoogle(),
+      );
+    }
+
+    final bookshelfAsync = ref.watch(bookshelfProvider);
+
+    return bookshelfAsync.when(
+      loading: () => const Center(child: CircularProgressIndicator()),
+      error: (e, _) => EmptyState(
+        icon: Icons.error_outline_rounded,
+        title: 'Lỗi: $e',
+        actionLabel: 'Thử lại',
+        onAction: () => ref.read(bookshelfProvider.notifier).fetch(),
+      ),
+      data: (_) {
+        final items = shelfStatus == ShelfStatus.reading
+            ? ref.watch(readingBookmarksProvider)
+            : ref.watch(completedBookmarksProvider);
+
+        return _BookshelfList(
+          bookmarks: items,
+          emptyLabel: shelfStatus == ShelfStatus.reading
+              ? 'Chưa có truyện đang đọc.'
+              : 'Chưa có truyện đã đọc xong.',
+          continueLabel: shelfStatus == ShelfStatus.reading ? 'Đọc tiếp' : 'Đã đọc',
+          showContinueButton: shelfStatus == ShelfStatus.reading,
+        );
+      },
     );
   }
 }
@@ -140,16 +136,7 @@ class _BookshelfList extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     if (bookmarks.isEmpty) {
-      return Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Icon(Icons.menu_book_outlined, size: 56),
-            const SizedBox(height: 12),
-            Text(emptyLabel),
-          ],
-        ),
-      );
+      return EmptyState(icon: Icons.menu_book_outlined, title: emptyLabel);
     }
 
     return RefreshIndicator(
@@ -315,10 +302,6 @@ class _BookmarkTile extends ConsumerWidget {
                     onPressed: () => _openContinueReader(context, ref),
                     icon: const Icon(Icons.menu_book_rounded),
                     label: Text(continueLabel),
-                    style: FilledButton.styleFrom(
-                      backgroundColor: const Color(0xFF14B8A6),
-                      foregroundColor: Colors.white,
-                    ),
                   ),
                 ),
               ],

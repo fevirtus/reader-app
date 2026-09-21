@@ -86,7 +86,7 @@ class _ShellNavItem extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
-    final activeColor = const Color(0xFF14B8A6);
+    final activeColor = colorScheme.primary;
     final inactiveColor = colorScheme.onSurfaceVariant;
 
     return Expanded(
@@ -117,7 +117,7 @@ class _ShellNavItem extends StatelessWidget {
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                      color: selected ? const Color(0xFFF7B500) : inactiveColor,
+                      color: selected ? activeColor : inactiveColor,
                       fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
                     ),
               ),

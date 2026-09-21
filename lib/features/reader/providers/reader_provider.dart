@@ -4,27 +4,27 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/models/chapter_model.dart';
 import '../../../core/models/reading_settings.dart';
 import '../../../core/network/providers.dart';
+import '../../../core/repositories/chapters_repository.dart';
 import '../../../core/storage/local_store.dart';
-import '../../../core/storage/offline_cache.dart';
 import '../../bookshelf/providers/bookshelf_provider.dart';
 
 // ─── Chapter content ─────────────────────────────────────────────────────────
 
 final chapterProvider =
     FutureProvider.family<ChapterModel, String>((ref, chapterId) async {
-  final offlineCache = ref.read(offlineCacheProvider);
+  final chaptersRepo = ref.read(chaptersRepositoryProvider);
 
-  // Try network first, fall back to cache
+  // Try network first, fall back to cache/download đã lưu cục bộ
   try {
     final client = ref.read(apiClientProvider);
     final res = await client.dio.get('/api/chapters/$chapterId');
     final chapter = ChapterModel.fromJson(res.data as Map<String, dynamic>);
-    // Cache for offline use (fire and forget)
-    unawaited(offlineCache.saveChapter(chapter));
+    // Cache for offline use (fire and forget) — không hạ cờ nếu chương đã được tải chủ động.
+    unawaited(chaptersRepo.cacheViewedChapter(chapter));
     return chapter;
   } catch (_) {
     debugPrint('[READER][CHAPTER][ERROR] Failed to load chapterId=$chapterId from network, trying cache');
-    final cached = await offlineCache.loadChapter(chapterId);
+    final cached = await chaptersRepo.getCachedChapter(chapterId);
     if (cached != null) return cached;
     debugPrint('[READER][CHAPTER][ERROR] No cache for chapterId=$chapterId');
     rethrow;

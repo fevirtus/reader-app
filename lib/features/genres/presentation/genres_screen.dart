@@ -4,6 +4,8 @@ import 'package:go_router/go_router.dart';
 
 import '../../../app/router/route_names.dart';
 import '../../../core/models/novel_model.dart';
+import '../../../shared/widgets/empty_state.dart';
+import '../../../shared/widgets/skeleton_box.dart';
 import '../providers/genres_provider.dart';
 
 class GenresScreen extends ConsumerWidget {
@@ -11,41 +13,49 @@ class GenresScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final genresAsync = ref.watch(genresProvider);
+    final genresAsync = ref.watch(genresListProvider);
+    final sync = ref.watch(genresSyncProvider);
+    final genres = genresAsync.valueOrNull ?? const [];
 
     return Scaffold(
       appBar: AppBar(title: const Text('Thể loại')),
-      body: genresAsync.when(
-        loading: () => const Center(child: CircularProgressIndicator()),
-        error: (e, _) => Center(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Icon(Icons.error_outline, size: 48),
-              const SizedBox(height: 8),
-              Text('Lỗi tải thể loại'),
-              TextButton(
-                onPressed: () => ref.invalidate(genresProvider),
-                child: const Text('Thử lại'),
+      body: genres.isEmpty && sync.isLoading
+          ? GridView.builder(
+              padding: const EdgeInsets.all(12),
+              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: 2,
+                crossAxisSpacing: 12,
+                mainAxisSpacing: 12,
+                childAspectRatio: 2.5,
               ),
-            ],
-          ),
-        ),
-        data: (genres) => GridView.builder(
-          padding: const EdgeInsets.all(12),
-          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-            crossAxisCount: 2,
-            crossAxisSpacing: 12,
-            mainAxisSpacing: 12,
-            childAspectRatio: 2.5,
-          ),
-          itemCount: genres.length,
-          itemBuilder: (context, index) {
-            final genre = genres[index];
-            return _GenreCard(genre: genre);
-          },
-        ),
-      ),
+              itemCount: 8,
+              itemBuilder: (context, index) =>
+                  const SkeletonBox(borderRadius: 12),
+            )
+          : genres.isEmpty && sync.hasError
+              ? EmptyState(
+                  icon: Icons.error_outline,
+                  title: 'Lỗi tải thể loại',
+                  actionLabel: 'Thử lại',
+                  onAction: () => ref.read(genresSyncProvider.notifier).refresh(),
+                )
+              : RefreshIndicator(
+                  onRefresh: () => ref.read(genresSyncProvider.notifier).refresh(),
+                  child: GridView.builder(
+                    padding: const EdgeInsets.all(12),
+                    gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                      crossAxisCount: 2,
+                      crossAxisSpacing: 12,
+                      mainAxisSpacing: 12,
+                      childAspectRatio: 2.5,
+                    ),
+                    itemCount: genres.length,
+                    itemBuilder: (context, index) {
+                      final genre = genres[index];
+                      return _GenreCard(genre: genre);
+                    },
+                  ),
+                ),
     );
   }
 }

@@ -12,7 +12,10 @@ import '../../../core/models/chapter_model.dart';
 import '../../../core/models/novel_model.dart';
 import '../../../core/storage/local_store.dart';
 import '../../../shared/widgets/star_rating.dart';
+import '../../../shared/widgets/status_pill.dart';
+import '../../auth/providers/auth_provider.dart';
 import '../../bookshelf/providers/bookshelf_provider.dart';
+import '../../downloads/providers/downloads_provider.dart';
 import '../providers/novels_provider.dart';
 
 final novelReadProgressProvider =
@@ -48,9 +51,16 @@ class _NovelDetailScreenState extends ConsumerState<NovelDetailScreen> {
   @override
   void initState() {
     super.initState();
-    Future.microtask(() {
+    Future.microtask(_refreshBookshelfIfAuthed);
+  }
+
+  // Bookmarks API yêu cầu đăng nhập — gọi khi chưa đăng nhập sẽ bị 401 và kích
+  // hoạt nhầm luồng "phiên hết hạn", đá người dùng chưa từng đăng nhập ra màn login.
+  void _refreshBookshelfIfAuthed() {
+    if (!mounted) return;
+    if (ref.read(isAuthenticatedProvider)) {
       ref.read(bookshelfProvider.notifier).fetch();
-    });
+    }
   }
 
   @override
@@ -62,9 +72,7 @@ class _NovelDetailScreenState extends ConsumerState<NovelDetailScreen> {
         _selectedRangeIndex = 0;
         _rangeFirstIndex.clear();
       });
-      Future.microtask(() {
-        ref.read(bookshelfProvider.notifier).fetch();
-      });
+      Future.microtask(_refreshBookshelfIfAuthed);
     }
   }
 
@@ -94,6 +102,7 @@ class _NovelDetailScreenState extends ConsumerState<NovelDetailScreen> {
       data: (novel) => Scaffold(
         appBar: AppBar(
           title: Text(novel.title, overflow: TextOverflow.ellipsis, maxLines: 1),
+          actions: [_DownloadAction(novelId: novel.id)],
         ),
         body: CustomScrollView(
           controller: _scrollController,
@@ -396,10 +405,6 @@ class _NovelDetailScreenState extends ConsumerState<NovelDetailScreen> {
     }
 
     final viewport = RenderAbstractViewport.of(anchorRender);
-    if (viewport == null) {
-      debugPrint('[ScrollToRange] No viewport for anchor render object');
-      return;
-    }
 
     // Absolute scroll offset where the chapter list starts.
     final anchorOffset = viewport.getOffsetToReveal(anchorRender, 0.0).offset;
@@ -419,65 +424,6 @@ class _NovelDetailScreenState extends ConsumerState<NovelDetailScreen> {
     );
   }
 
-  // ignore: unused_element
-  Future<void> _scrollToRange(GlobalKey targetKey, {int retryCount = 0}) async {
-    // Delay để rebuild + layout settle
-    await Future<void>.delayed(const Duration(milliseconds: 100));
-    if (!mounted) {
-      debugPrint('[ScrollToRange] Not mounted');
-      return;
-    }
-    if (!_scrollController.hasClients) {
-      debugPrint('[ScrollToRange] No scroll clients');
-      return;
-    }
-
-    final ctx = targetKey.currentContext;
-    if (ctx == null) {
-      debugPrint('[ScrollToRange] Target context is null (retry: $retryCount)');
-      if (retryCount < 3) {
-        await Future<void>.delayed(const Duration(milliseconds: 100));
-        return _scrollToRange(targetKey, retryCount: retryCount + 1);
-      }
-      return;
-    }
-
-    final box = ctx.findRenderObject() as RenderBox?;
-    if (box == null) {
-      debugPrint('[ScrollToRange] RenderBox is null (retry: $retryCount)');
-      if (retryCount < 3) {
-        await Future<void>.delayed(const Duration(milliseconds: 100));
-        return _scrollToRange(targetKey, retryCount: retryCount + 1);
-      }
-      return;
-    }
-
-    try {
-      // Compute absolute Y of the item on screen
-      final itemScreenY = box.localToGlobal(Offset.zero).dy;
-      debugPrint('[ScrollToRange] Item screen Y: $itemScreenY');
-
-      // Target Y: just below AppBar + sticky tab bar + sticky chips, with small padding
-      const targetScreenY = kToolbarHeight + _kStickyTabHeight + _kStickyChipsHeight + 8.0;
-      debugPrint('[ScrollToRange] Target screen Y: $targetScreenY');
-
-      final delta = itemScreenY - targetScreenY;
-      final currentOffset = _scrollController.offset;
-      final target = (currentOffset + delta).clamp(0.0, _scrollController.position.maxScrollExtent);
-
-      debugPrint('[ScrollToRange] Current offset: $currentOffset, Delta: $delta, Target: $target, Max: ${_scrollController.position.maxScrollExtent}');
-
-      await _scrollController.animateTo(
-        target,
-        duration: const Duration(milliseconds: 350),
-        curve: Curves.easeOut,
-      );
-      debugPrint('[ScrollToRange] Scroll completed');
-    } catch (e) {
-      debugPrint('[ScrollToRange] Error: $e');
-    }
-  }
-
   List<_ChapterRange> _buildChapterRanges(List<ChapterListItem> chapters) {
     if (chapters.isEmpty) return const [];
     final maxNum = chapters.last.number;
@@ -489,16 +435,96 @@ class _NovelDetailScreenState extends ConsumerState<NovelDetailScreen> {
     return ranges;
   }
 
-  Widget _buildPlaceholderContent(BuildContext context, String text) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        border: Border.all(color: Theme.of(context).colorScheme.outline),
-        borderRadius: BorderRadius.circular(8),
+}
+
+// ── Nút tải truyện để đọc ngoại tuyến ──────────────────────────────────────────
+
+class _DownloadAction extends ConsumerWidget {
+  const _DownloadAction({required this.novelId});
+  final String novelId;
+
+  Future<void> _confirmDelete(BuildContext context, WidgetRef ref) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Xoá bản tải xuống?'),
+        content: const Text('Các chương đã tải của truyện này sẽ bị xoá khỏi máy.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Huỷ'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Xoá'),
+          ),
+        ],
       ),
-      child: Text(text, style: Theme.of(context).textTheme.bodyMedium),
     );
+    if (confirmed == true) {
+      await ref.read(downloadActionsProvider).delete(novelId);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final download = ref.watch(downloadForNovelProvider(novelId)).valueOrNull;
+    final actions = ref.read(downloadActionsProvider);
+
+    if (download == null) {
+      return IconButton(
+        tooltip: 'Tải xuống để đọc ngoại tuyến',
+        icon: const Icon(Icons.download_for_offline_outlined),
+        onPressed: () => actions.start(novelId),
+      );
+    }
+
+    switch (download.status) {
+      case 'downloading':
+        final progress = download.totalChapters > 0
+            ? download.downloadedChapters / download.totalChapters
+            : null;
+        return IconButton(
+          tooltip:
+              'Đang tải ${download.downloadedChapters}/${download.totalChapters} — bấm để tạm dừng',
+          onPressed: () => actions.cancel(novelId),
+          icon: SizedBox(
+            width: 24,
+            height: 24,
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                CircularProgressIndicator(value: progress, strokeWidth: 2.4),
+                const Icon(Icons.pause, size: 12),
+              ],
+            ),
+          ),
+        );
+      case 'done':
+        return IconButton(
+          tooltip: 'Đã tải xuống — bấm để xoá',
+          icon: Icon(Icons.download_done_rounded, color: Theme.of(context).colorScheme.primary),
+          onPressed: () => _confirmDelete(context, ref),
+        );
+      case 'failed':
+        return IconButton(
+          tooltip: download.errorMessage ?? 'Tải lỗi — bấm để thử lại',
+          icon: Icon(Icons.error_outline_rounded, color: Theme.of(context).colorScheme.error),
+          onPressed: () => actions.start(novelId),
+        );
+      case 'paused':
+        return IconButton(
+          tooltip: 'Đã tạm dừng — bấm để tiếp tục tải',
+          icon: const Icon(Icons.download_outlined),
+          onPressed: () => actions.start(novelId),
+        );
+      default:
+        return IconButton(
+          tooltip: 'Tải xuống để đọc ngoại tuyến',
+          icon: const Icon(Icons.download_for_offline_outlined),
+          onPressed: () => actions.start(novelId),
+        );
+    }
   }
 }
 
@@ -564,9 +590,7 @@ class _NovelInfoCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     final textTheme = Theme.of(context).textTheme;
-    final statusColor = novel.status.toLowerCase().contains('ho\u00e0n')
-        ? Colors.green.shade700
-        : colorScheme.tertiary;
+    final isCompleted = novel.status.toLowerCase().contains('ho\u00e0n');
 
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -579,7 +603,7 @@ class _NovelInfoCard extends StatelessWidget {
                   width: 90,
                   height: 130,
                   fit: BoxFit.cover,
-                  errorWidget: (_, __, ___) => _placeholder(colorScheme),
+                  errorWidget: (_, _, _) => _placeholder(colorScheme),
                 )
               : _placeholder(colorScheme),
         ),
@@ -602,17 +626,9 @@ class _NovelInfoCard extends StatelessWidget {
                       ?.copyWith(color: colorScheme.onSurfaceVariant),
                 ),
               const SizedBox(height: 6),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                decoration: BoxDecoration(
-                  color: statusColor.withAlpha(30),
-                  borderRadius: BorderRadius.circular(4),
-                  border: Border.all(color: statusColor.withAlpha(120)),
-                ),
-                child: Text(
-                  novel.status,
-                  style: textTheme.labelSmall?.copyWith(color: statusColor),
-                ),
+              StatusPill(
+                label: novel.status,
+                tone: isCompleted ? StatusPillTone.success : StatusPillTone.neutral,
               ),
               const SizedBox(height: 8),
               if (novel.genres.isNotEmpty)
@@ -674,32 +690,6 @@ class _SmallChip extends StatelessWidget {
         borderRadius: BorderRadius.circular(4),
       ),
       child: Text(label, style: Theme.of(context).textTheme.labelSmall),
-    );
-  }
-}
-
-class _ChapterListItem extends StatelessWidget {
-  final ChapterListItem chapter;
-  final VoidCallback onTap;
-
-  const _ChapterListItem({
-    required this.chapter,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 12),
-        child: Text(
-          'Chương ${chapter.number}: ${chapter.title}',
-          maxLines: 2,
-          overflow: TextOverflow.ellipsis,
-          style: Theme.of(context).textTheme.bodyMedium,
-        ),
-      ),
     );
   }
 }

@@ -84,6 +84,28 @@ class NovelModel extends Equatable {
             : null,
       );
 
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'title': title,
+        'slug': slug,
+        'authorName': authorName,
+        'status': status,
+        'totalChapters': totalChapters,
+        'originalTitle': originalTitle,
+        'description': description,
+        'coverUrl': coverUrl,
+        'coverColor': coverColor,
+        'views': views,
+        'rating': rating,
+        'ratingCount': ratingCount,
+        'userRating': userRating,
+        'bookmarkCount': bookmarkCount,
+        'genres': genres.map((g) => g.toJson()).toList(),
+        'seriesId': seriesId,
+        'series': series?.toJson(),
+        'latestChapter': latestChapter?.toJson(),
+      };
+
   @override
   List<Object?> get props => [id, slug];
 }
@@ -106,6 +128,15 @@ class GenreModel extends Equatable {
         novelCount: (json['novelCount'] as num?)?.toInt() ?? 0,
       );
 
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'name': name,
+        'slug': slug,
+        'description': description,
+        'icon': icon,
+        'novelCount': novelCount,
+      };
+
   @override
   List<Object?> get props => [id, slug];
 }
@@ -127,6 +158,13 @@ class SeriesModel extends Equatable {
             [],
       );
 
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'name': name,
+        'slug': slug,
+        'novels': novels.map((n) => n.toJson()).toList(),
+      };
+
   @override
   List<Object?> get props => [id, slug];
 }
@@ -144,6 +182,12 @@ class LatestChapterInfo extends Equatable {
             ? DateTime.tryParse(json['createdAt'] as String) ?? DateTime.now()
             : DateTime.now(),
       );
+
+  Map<String, dynamic> toJson() => {
+        'number': number,
+        'title': title,
+        'createdAt': createdAt.toIso8601String(),
+      };
 
   @override
   List<Object?> get props => [number];
