@@ -1,154 +1,152 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-
 import '../../../app/router/route_names.dart';
+import '../../../core/models/bookmark_model.dart';
 import '../../../shared/widgets/main_app_header.dart';
 import '../../auth/providers/auth_provider.dart';
 import '../../bookshelf/providers/bookshelf_provider.dart';
 
 class ProfileScreen extends ConsumerWidget {
   const ProfileScreen({super.key});
-
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final authState = ref.watch(authProvider);
-    final bookshelfAsync = ref.watch(bookshelfProvider);
-    final bookmarkedCount =
-        bookshelfAsync.maybeWhen(data: (items) => items.length, orElse: () => 0);
-    final displayName = authState is AuthAuthenticated
-      ? ((authState.user.name != null && authState.user.name!.trim().isNotEmpty)
-        ? authState.user.name!.trim()
-        : authState.user.email)
-      : '';
-
+    final auth = ref.watch(authProvider);
+    final t = Theme.of(context);
+    final user = auth is AuthAuthenticated ? auth.user : null;
+    final name = user == null
+        ? 'Góc đọc của bạn'
+        : (user.name?.trim().isNotEmpty == true
+              ? user.name!.trim()
+              : user.email);
+    final books = user == null
+        ? null
+        : ref.watch(bookshelfProvider).valueOrNull;
     return Scaffold(
       body: Column(
         children: [
-          const MainAppHeader(title: 'Trang cá nhân', showGenresShortcut: false),
+          const MainAppHeader(
+            title: 'Cá nhân',
+            subtitle: 'Một không gian đọc theo cách của bạn.',
+            showSearch: false,
+          ),
           Expanded(
-            child: switch (authState) {
-              AuthAuthenticated(:final user) => SingleChildScrollView(
-                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+            child: ListView(
+              padding: const EdgeInsets.fromLTRB(24, 4, 24, 32),
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(22),
+                  decoration: BoxDecoration(
+                    color: t.colorScheme.surface,
+                    borderRadius: BorderRadius.circular(24),
+                    border: Border.all(color: t.colorScheme.outlineVariant),
+                  ),
                   child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Container(
-                        padding: const EdgeInsets.all(14),
-                        decoration: BoxDecoration(
-                          color: Theme.of(context).colorScheme.surfaceContainerLow,
-                          borderRadius: BorderRadius.circular(22),
+                      CircleAvatar(
+                        radius: 36,
+                        backgroundColor: t.colorScheme.primary.withAlpha(22),
+                        foregroundColor: t.colorScheme.primary,
+                        backgroundImage: user?.image != null
+                            ? NetworkImage(user!.image!)
+                            : null,
+                        child: user?.image == null
+                            ? const Icon(Icons.person_outline_rounded, size: 36)
+                            : null,
+                      ),
+                      const SizedBox(height: 16),
+                      Text(
+                        name,
+                        textAlign: TextAlign.center,
+                        style: t.textTheme.headlineSmall,
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        user?.email ??
+                            'Đăng nhập để lưu tủ sách và tiến độ đọc.',
+                        textAlign: TextAlign.center,
+                        style: t.textTheme.bodySmall?.copyWith(
+                          color: t.colorScheme.onSurfaceVariant,
                         ),
-                        child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
+                      ),
+                      if (user == null) ...[
+                        const SizedBox(height: 20),
+                        FilledButton.icon(
+                          onPressed: auth is AuthLoading
+                              ? null
+                              : () => context.push(RouteNames.login),
+                          icon: const Icon(Icons.login_rounded, size: 20),
+                          label: const Text('Đăng nhập bằng Google'),
+                        ),
+                      ],
+                      if (books != null) ...[
+                        const SizedBox(height: 22),
+                        Divider(color: t.colorScheme.outlineVariant),
+                        const SizedBox(height: 16),
+                        Row(
                           children: [
-                            CircleAvatar(
-                              radius: 34,
-                              backgroundImage:
-                                  user.image != null ? NetworkImage(user.image!) : null,
-                              child: user.image == null
-                                  ? Text(
-                                      displayName.isNotEmpty ? displayName[0].toUpperCase() : 'U',
-                                      style: Theme.of(context).textTheme.headlineMedium,
-                                    )
-                                  : null,
+                            _Stat(
+                              value: books
+                                  .where(
+                                    (b) => b.shelfStatus == ShelfStatus.reading,
+                                  )
+                                  .length,
+                              label: 'Đang đọc',
                             ),
-                            const SizedBox(width: 14),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    displayName,
-                                    style: Theme.of(context).textTheme.headlineSmall,
-                                  ),
-                                  Text(
-                                    user.role.toLowerCase(),
-                                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                                          color: Theme.of(context).colorScheme.onSurfaceVariant,
-                                        ),
-                                  ),
-                                  const SizedBox(height: 10),
-                                  _AccountStatRow(
-                                    icon: Icons.auto_awesome,
-                                    label: 'Tiên Thạch: 0.00 TT',
-                                  ),
-                                  const SizedBox(height: 4),
-                                  _AccountStatRow(
-                                    icon: Icons.diamond,
-                                    label: 'Linh Phiếu: 0 LP',
-                                  ),
-                                  const SizedBox(height: 4),
-                                  _AccountStatRow(
-                                    icon: Icons.local_activity,
-                                    label: 'Ngọc Phiếu: $bookmarkedCount',
-                                  ),
-                                  const SizedBox(height: 12),
-                                  FilledButton.icon(
-                                    onPressed: () {},
-                                    icon: const Icon(Icons.workspace_premium_rounded),
-                                    label: const Text('Thêm Tiên Thạch'),
-                                  ),
-                                ],
-                              ),
+                            _Stat(
+                              value: books.where((b) => b.isCompleted).length,
+                              label: 'Đã đọc',
                             ),
                           ],
                         ),
-                      ),
-                      const SizedBox(height: 18),
-                      _ProfileMenuTile(
-                        title: 'Chỉnh sửa thông tin',
-                        onTap: () => context.push(RouteNames.settings),
-                      ),
-                      _ProfileMenuTile(
-                        title: 'Lịch sử giao dịch',
-                        onTap: () {},
-                      ),
-                      _ProfileMenuTile(
-                        title: 'Liên hệ, báo lỗi',
-                        onTap: () {},
-                      ),
-                      _ProfileMenuTile(
-                        title: 'Điều khoản dịch vụ',
-                        onTap: () {},
-                      ),
-                      _ProfileMenuTile(
-                        title: 'Xóa tài khoản',
-                        onTap: () {},
-                      ),
-                      _ProfileMenuTile(
-                        title: 'Đăng xuất',
-                        onTap: () async {
-                          await ref.read(authProvider.notifier).signOut();
-                          if (context.mounted) context.go(RouteNames.home);
-                        },
-                      ),
+                      ],
                     ],
                   ),
                 ),
-              AuthError(:final message) => Center(child: Text(message)),
-              AuthUnauthenticated() => Center(
-                  child: Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        FilledButton(
-                          onPressed: () => ref.read(authProvider.notifier).signInWithGoogle(),
-                          child: const Text('Đăng nhập bằng Google'),
-                        ),
-                        const SizedBox(height: 12),
-                        OutlinedButton.icon(
-                          onPressed: () => context.push(RouteNames.settings),
-                          icon: const Icon(Icons.tune),
-                          label: const Text('Mở Cài Đặt Đọc'),
-                        ),
-                      ],
-                    ),
+                const SizedBox(height: 28),
+                Text(
+                  'TRẢI NGHIỆM ĐỌC',
+                  style: t.textTheme.labelSmall?.copyWith(
+                    color: t.colorScheme.onSurfaceVariant,
+                    letterSpacing: 1.5,
                   ),
                 ),
-              _ => const Center(child: CircularProgressIndicator()),
-            },
+                const SizedBox(height: 12),
+                _MenuTile(
+                  icon: Icons.tune_rounded,
+                  title: 'Cài đặt đọc',
+                  subtitle: 'Kiểu chữ, màu sắc và bố cục',
+                  onTap: () => context.push(RouteNames.settings),
+                ),
+                _MenuTile(
+                  icon: Icons.bookmarks_outlined,
+                  title: 'Tủ sách của tôi',
+                  subtitle: 'Đọc tiếp và quản lý truyện đã tải',
+                  onTap: () => context.go(RouteNames.bookshelf),
+                ),
+                if (user != null) ...[
+                  const SizedBox(height: 16),
+                  _MenuTile(
+                    icon: Icons.logout_rounded,
+                    title: 'Đăng xuất',
+                    subtitle: 'Bản tải trên thiết bị vẫn được giữ lại',
+                    onTap: () async {
+                      await ref.read(authProvider.notifier).signOut();
+                      if (context.mounted) context.go(RouteNames.home);
+                    },
+                  ),
+                ],
+                const SizedBox(height: 28),
+                Text(
+                  'VIRTUS READER',
+                  textAlign: TextAlign.center,
+                  style: t.textTheme.labelSmall?.copyWith(
+                    letterSpacing: 2,
+                    color: t.colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ],
+            ),
           ),
         ],
       ),
@@ -156,42 +154,68 @@ class ProfileScreen extends ConsumerWidget {
   }
 }
 
-class _AccountStatRow extends StatelessWidget {
-  const _AccountStatRow({required this.icon, required this.label});
-
-  final IconData icon;
+class _Stat extends StatelessWidget {
+  const _Stat({required this.value, required this.label});
+  final int value;
   final String label;
-
   @override
-  Widget build(BuildContext context) {
-    return Row(
+  Widget build(BuildContext context) => Expanded(
+    child: Column(
       children: [
-        Icon(icon, size: 18, color: Theme.of(context).colorScheme.onSurfaceVariant),
-        const SizedBox(width: 8),
-        Expanded(child: Text(label, style: Theme.of(context).textTheme.titleMedium)),
+        Text(
+          '$value',
+          style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+            color: Theme.of(context).colorScheme.primary,
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(label, style: Theme.of(context).textTheme.bodySmall),
       ],
-    );
-  }
+    ),
+  );
 }
 
-class _ProfileMenuTile extends StatelessWidget {
-  const _ProfileMenuTile({required this.title, required this.onTap});
-
+class _MenuTile extends StatelessWidget {
+  const _MenuTile({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.onTap,
+  });
+  final IconData icon;
   final String title;
+  final String subtitle;
   final VoidCallback onTap;
-
   @override
   Widget build(BuildContext context) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 10),
-      decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surfaceContainer,
-        borderRadius: BorderRadius.circular(14),
-      ),
-      child: ListTile(
-        title: Text(title),
-        trailing: const Icon(Icons.chevron_right_rounded),
-        onTap: onTap,
+    final cs = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Material(
+        color: cs.surface,
+        borderRadius: BorderRadius.circular(18),
+        child: ListTile(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(18),
+          ),
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: 16,
+            vertical: 8,
+          ),
+          leading: Icon(icon, color: cs.primary),
+          title: Text(title, style: Theme.of(context).textTheme.titleSmall),
+          subtitle: Padding(
+            padding: const EdgeInsets.only(top: 4),
+            child: Text(
+              subtitle,
+              style: Theme.of(
+                context,
+              ).textTheme.bodySmall?.copyWith(color: cs.onSurfaceVariant),
+            ),
+          ),
+          trailing: const Icon(Icons.chevron_right_rounded, size: 20),
+          onTap: onTap,
+        ),
       ),
     );
   }

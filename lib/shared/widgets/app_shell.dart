@@ -1,128 +1,63 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
-
 import '../../app/router/route_names.dart';
 
 class AppShell extends StatelessWidget {
   const AppShell({super.key, required this.child});
-
   final Widget child;
-
-  String _tabForLocation(String location) {
-    if (location.startsWith(RouteNames.bookshelf)) return RouteNames.bookshelf;
-    if (location.startsWith(RouteNames.genres)) return RouteNames.genres;
-    if (location.startsWith(RouteNames.profile)) return RouteNames.profile;
-    return RouteNames.home;
-  }
-
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
-    final location = GoRouterState.of(context).uri.path;
-    final selectedTab = _tabForLocation(location);
-
+    final cs = Theme.of(context).colorScheme;
+    final path = GoRouterState.of(context).uri.path;
+    final index = path.startsWith(RouteNames.bookshelf)
+        ? 1
+        : path.startsWith(RouteNames.genres)
+        ? 2
+        : path.startsWith(RouteNames.profile)
+        ? 3
+        : 0;
     return Scaffold(
       body: child,
-      bottomNavigationBar: Container(
+      bottomNavigationBar: DecoratedBox(
         decoration: BoxDecoration(
-          color: colorScheme.surface,
-          border: Border(
-            top: BorderSide(color: colorScheme.outlineVariant.withAlpha(80)),
-          ),
+          border: Border(top: BorderSide(color: cs.outlineVariant)),
         ),
-        child: SafeArea(
-          top: false,
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(10, 8, 10, 6),
-            child: Row(
-              children: [
-                _ShellNavItem(
-                  icon: Icons.home_rounded,
-                  label: 'Trang chủ',
-                  selected: selectedTab == RouteNames.home,
-                  onTap: () => context.go(RouteNames.home),
-                ),
-                _ShellNavItem(
-                  icon: Icons.layers_rounded,
-                  label: 'Tủ sách',
-                  selected: selectedTab == RouteNames.bookshelf,
-                  onTap: () => context.go(RouteNames.bookshelf),
-                ),
-                _ShellNavItem(
-                  icon: Icons.category_rounded,
-                  label: 'Thể loại',
-                  selected: selectedTab == RouteNames.genres,
-                  onTap: () => context.go(RouteNames.genres),
-                ),
-                _ShellNavItem(
-                  icon: Icons.person_rounded,
-                  label: 'Tài khoản',
-                  selected: selectedTab == RouteNames.profile,
-                  onTap: () => context.go(RouteNames.profile),
-                ),
-              ],
+        child: NavigationBar(
+          selectedIndex: index,
+          height: 72,
+          elevation: 0,
+          backgroundColor: cs.surface,
+          indicatorColor: cs.primary.withAlpha(25),
+          onDestinationSelected: (i) => context.go(
+            [
+              RouteNames.home,
+              RouteNames.bookshelf,
+              RouteNames.genres,
+              RouteNames.profile,
+            ][i],
+          ),
+          destinations: const [
+            NavigationDestination(
+              icon: Icon(Icons.explore_outlined),
+              selectedIcon: Icon(Icons.explore),
+              label: 'Khám phá',
             ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _ShellNavItem extends StatelessWidget {
-  const _ShellNavItem({
-    required this.icon,
-    required this.label,
-    required this.selected,
-    required this.onTap,
-  });
-
-  final IconData icon;
-  final String label;
-  final bool selected;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    final activeColor = colorScheme.primary;
-    final inactiveColor = colorScheme.onSurfaceVariant;
-
-    return Expanded(
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(18),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 4),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              AnimatedContainer(
-                duration: const Duration(milliseconds: 180),
-                padding: const EdgeInsets.all(6),
-                decoration: BoxDecoration(
-                  color: selected ? activeColor.withAlpha(28) : Colors.transparent,
-                  shape: BoxShape.circle,
-                ),
-                child: Icon(
-                  icon,
-                  size: 22,
-                  color: selected ? activeColor : inactiveColor,
-                ),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                label,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                      color: selected ? activeColor : inactiveColor,
-                      fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-                    ),
-              ),
-            ],
-          ),
+            NavigationDestination(
+              icon: Icon(Icons.bookmarks_outlined),
+              selectedIcon: Icon(Icons.bookmarks_rounded),
+              label: 'Tủ sách',
+            ),
+            NavigationDestination(
+              icon: Icon(Icons.grid_view_outlined),
+              selectedIcon: Icon(Icons.grid_view_rounded),
+              label: 'Thể loại',
+            ),
+            NavigationDestination(
+              icon: Icon(Icons.person_outline_rounded),
+              selectedIcon: Icon(Icons.person_rounded),
+              label: 'Cá nhân',
+            ),
+          ],
         ),
       ),
     );

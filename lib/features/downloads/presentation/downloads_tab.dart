@@ -1,4 +1,4 @@
-import 'package:cached_network_image/cached_network_image.dart';
+import '../../../shared/widgets/book_cover.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -29,7 +29,7 @@ class DownloadsTab extends ConsumerWidget {
     }
 
     return ListView.separated(
-      padding: const EdgeInsets.fromLTRB(14, 14, 14, 24),
+      padding: const EdgeInsets.fromLTRB(24, 12, 24, 24),
       itemCount: downloads.length,
       separatorBuilder: (_, _) => const SizedBox(height: 12),
       itemBuilder: (context, index) => _DownloadTile(entry: downloads[index]),
@@ -42,7 +42,9 @@ class _DownloadTile extends ConsumerWidget {
   final DownloadWithNovel entry;
 
   String _formatBytes(int bytes) {
-    if (bytes >= 1024 * 1024) return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+    if (bytes >= 1024 * 1024) {
+      return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+    }
     if (bytes >= 1024) return '${(bytes / 1024).toStringAsFixed(0)} KB';
     return '$bytes B';
   }
@@ -59,28 +61,14 @@ class _DownloadTile extends ConsumerWidget {
       child: Container(
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
-          color: colorScheme.surfaceContainerLow,
+          color: colorScheme.surface,
+          border: Border.all(color: colorScheme.outlineVariant),
           borderRadius: BorderRadius.circular(18),
         ),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            ClipRRect(
-              borderRadius: BorderRadius.circular(10),
-              child: novel?.coverUrl != null
-                  ? CachedNetworkImage(
-                      imageUrl: novel!.coverUrl!,
-                      width: 72,
-                      height: 100,
-                      fit: BoxFit.cover,
-                    )
-                  : Container(
-                      width: 72,
-                      height: 100,
-                      color: colorScheme.primaryContainer,
-                      child: const Icon(Icons.menu_book, size: 24),
-                    ),
-            ),
+            BookCover(url: novel?.coverUrl, width: 72, height: 104),
             const SizedBox(width: 12),
             Expanded(
               child: Column(
@@ -90,16 +78,21 @@ class _DownloadTile extends ConsumerWidget {
                     novel?.title ?? download.novelId,
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600),
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
                   const SizedBox(height: 6),
                   _StatusLine(download: download, formatBytes: _formatBytes),
-                  if (download.status == 'downloading' && download.totalChapters > 0) ...[
+                  if (download.status == 'downloading' &&
+                      download.totalChapters > 0) ...[
                     const SizedBox(height: 8),
                     ClipRRect(
                       borderRadius: BorderRadius.circular(4),
                       child: LinearProgressIndicator(
-                        value: download.downloadedChapters / download.totalChapters,
+                        value:
+                            download.downloadedChapters /
+                            download.totalChapters,
                         minHeight: 6,
                       ),
                     ),
@@ -110,10 +103,25 @@ class _DownloadTile extends ConsumerWidget {
                       if (download.status == 'downloading')
                         TextButton.icon(
                           onPressed: () => actions.cancel(download.novelId),
-                          icon: const Icon(Icons.pause_circle_outline, size: 18),
+                          icon: const Icon(
+                            Icons.pause_circle_outline,
+                            size: 18,
+                          ),
                           label: const Text('Tạm dừng'),
                         )
-                      else if (download.status == 'failed' || download.status == 'paused')
+                      else if (download.status == 'done')
+                        TextButton.icon(
+                          onPressed: () => context.push(
+                            RouteNames.novelDetail(download.novelId),
+                          ),
+                          icon: const Icon(
+                            Icons.auto_stories_outlined,
+                            size: 18,
+                          ),
+                          label: const Text('Mở truyện'),
+                        )
+                      else if (download.status == 'failed' ||
+                          download.status == 'paused')
                         TextButton.icon(
                           onPressed: () => actions.start(download.novelId),
                           icon: const Icon(Icons.refresh_rounded, size: 18),
@@ -122,7 +130,10 @@ class _DownloadTile extends ConsumerWidget {
                       const Spacer(),
                       IconButton(
                         onPressed: () => actions.delete(download.novelId),
-                        icon: const Icon(Icons.delete_outline_rounded, size: 20),
+                        icon: const Icon(
+                          Icons.delete_outline_rounded,
+                          size: 20,
+                        ),
                         tooltip: 'Xoá bản tải',
                       ),
                     ],
@@ -149,14 +160,20 @@ class _StatusLine extends StatelessWidget {
     final success = isDark ? AppColors.darkSuccess : AppColors.lightSuccess;
     switch (download.status) {
       case 'downloading':
-        return Text('Đang tải ${download.downloadedChapters}/${download.totalChapters} chương', style: style);
+        return Text(
+          'Đang tải ${download.downloadedChapters}/${download.totalChapters} chương',
+          style: style,
+        );
       case 'done':
         return Text(
           '${download.totalChapters} chương · ${formatBytes(download.bytesSize)}',
           style: style?.copyWith(color: success, fontWeight: FontWeight.w600),
         );
       case 'paused':
-        return Text('Đã tạm dừng ở ${download.downloadedChapters}/${download.totalChapters} chương', style: style);
+        return Text(
+          'Đã tạm dừng ở ${download.downloadedChapters}/${download.totalChapters} chương',
+          style: style,
+        );
       case 'failed':
         return Text(
           download.errorMessage ?? 'Tải lỗi',

@@ -1,18 +1,18 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
-
 import '../../app/router/route_names.dart';
 
 class MainAppHeader extends StatelessWidget {
   const MainAppHeader({
     super.key,
-    this.title = 'Đăng truyện',
+    this.title = 'Khám phá',
+    this.subtitle,
     this.showSearch = true,
     this.showGenresShortcut = true,
     this.bottom,
   });
-
   final String title;
+  final String? subtitle;
   final bool showSearch;
   final bool showGenresShortcut;
   final Widget? bottom;
@@ -20,77 +20,68 @@ class MainAppHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
-
-    return Container(
-      padding: const EdgeInsets.fromLTRB(14, 10, 14, 12),
-      decoration: BoxDecoration(
-        color: colorScheme.surface.withAlpha(245),
-        border: Border(
-          bottom: BorderSide(color: colorScheme.outlineVariant.withAlpha(90)),
-        ),
-      ),
+    final cs = theme.colorScheme;
+    return ColoredBox(
+      color: theme.scaffoldBackgroundColor,
       child: SafeArea(
         bottom: false,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Row(
-              children: [
-                GestureDetector(
-                  onTap: () => context.go(RouteNames.home),
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(10),
-                    child: SizedBox(
-                      width: 34,
-                      height: 34,
-                      child: Image.asset(
-                        'assets/app_icon.png',
-                        fit: BoxFit.contain,
-                        errorBuilder: (context, error, stackTrace) => Icon(
-                          Icons.menu_book_rounded,
-                          color: theme.colorScheme.primary,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(24, 14, 20, 18),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'VIRTUS READER',
+                          style: theme.textTheme.labelSmall?.copyWith(
+                            color: cs.primary,
+                            letterSpacing: 2,
+                            fontWeight: FontWeight.w700,
+                          ),
                         ),
+                        const SizedBox(height: 6),
+                        Text(
+                          title,
+                          style: theme.textTheme.headlineMedium?.copyWith(
+                            fontSize: 28,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  if (showSearch)
+                    IconButton.filledTonal(
+                      tooltip: 'Tìm truyện',
+                      style: IconButton.styleFrom(
+                        backgroundColor: cs.surface,
+                        foregroundColor: cs.onSurface,
+                        minimumSize: const Size(48, 48),
+                        side: BorderSide(color: cs.outlineVariant),
                       ),
+                      onPressed: () => context.go(RouteNames.search),
+                      icon: const Icon(Icons.search_rounded),
                     ),
+                ],
+              ),
+              if (subtitle != null) ...[
+                const SizedBox(height: 8),
+                Text(
+                  subtitle!,
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: cs.onSurfaceVariant,
                   ),
                 ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Text(
-                    "Virtus's Reader",
-                    textAlign: TextAlign.center,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.titleMedium?.copyWith(
-                      color: colorScheme.onSurface,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                if (showSearch)
-                  IconButton(
-                    tooltip: 'Tìm kiếm',
-                    visualDensity: VisualDensity.compact,
-                    onPressed: () => context.go(RouteNames.search),
-                    icon: const Icon(Icons.search_rounded),
-                    color: colorScheme.onSurface,
-                  ),
               ],
-            ),
-            if (bottom != null) ...[
-              const SizedBox(height: 12),
-              bottom!,
+              if (bottom != null) ...[const SizedBox(height: 18), bottom!],
             ],
-          ],
+          ),
         ),
       ),
     );
   }
 }
-
-
-
-
-

@@ -14,24 +14,34 @@ class SectionHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     return Padding(
-      padding: const EdgeInsets.fromLTRB(AppSpacing.lg, AppSpacing.lg, AppSpacing.md, AppSpacing.sm),
+      padding: const EdgeInsets.fromLTRB(24, AppSpacing.lg, 20, AppSpacing.sm),
       child: Row(
         children: [
-          Text(title, style: Theme.of(context).textTheme.titleLarge),
-          const Spacer(),
+          Expanded(
+            child: Text(title, style: Theme.of(context).textTheme.titleLarge),
+          ),
           if (onMore != null)
             InkWell(
               onTap: onMore,
               borderRadius: BorderRadius.circular(AppRadius.pill),
               child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xs, vertical: AppSpacing.xs),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: AppSpacing.xs,
+                  vertical: 12,
+                ),
                 child: Row(
                   children: [
                     Text(
-                      'Xem thêm',
-                      style: Theme.of(context).textTheme.labelLarge?.copyWith(color: colorScheme.primary),
+                      'Tất cả',
+                      style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                        color: colorScheme.primary,
+                      ),
                     ),
-                    Icon(Icons.chevron_right_rounded, color: colorScheme.primary, size: 18),
+                    Icon(
+                      Icons.chevron_right_rounded,
+                      color: colorScheme.primary,
+                      size: 18,
+                    ),
                   ],
                 ),
               ),

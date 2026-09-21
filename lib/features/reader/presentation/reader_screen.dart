@@ -1296,12 +1296,7 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
                                                 ?.copyWith(color: readerTextColor),
                                           ),
                                           const SizedBox(height: 12),
-                                          _NavButtons(
-                                            chapter: chapter,
-                                            onGoPrevious: () => _goToPreviousChapter(chapter),
-                                            onGoNext: () => _goToNextChapter(chapter),
-                                          ),
-                                          const SizedBox(height: 20),
+                                          const SizedBox(height: 12),
                                           if (chapter.content.trim().isEmpty)
                                             Text(
                                               'Chương này hiện chưa có nội dung.',
@@ -1422,65 +1417,45 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
           );
         },
       ),
-      floatingActionButton: chapterAsync.hasValue
-          ? ValueListenableBuilder<bool>(
-              valueListenable: _showQuickActions,
-              builder: (context, showQuickActions, _) {
-                return AnimatedSlide(
-                  duration: const Duration(milliseconds: 180),
-                  curve: Curves.easeOut,
-                  offset: showQuickActions ? Offset.zero : const Offset(0, 1.4),
-                  child: AnimatedOpacity(
-                    duration: const Duration(milliseconds: 140),
-                    opacity: showQuickActions ? 1 : 0,
-                    child: Builder(
-                      builder: (context) {
-                        final chapter = chapterAsync.value!;
-                        return Column(
-                          mainAxisSize: MainAxisSize.min,
-                          crossAxisAlignment: CrossAxisAlignment.end,
-                          children: [
-                            FloatingActionButton.small(
-                              heroTag: 'reader-scroll-top',
-                              onPressed: _scrollToTop,
-                              child: const Icon(Icons.vertical_align_top_rounded, size: 20),
-                            ),
-                            const SizedBox(height: 10),
-                            FloatingActionButton.small(
-                              heroTag: 'reader-toc',
-                              onPressed: () => _openChapterToc(chapter),
-                              child: const Icon(Icons.list_alt_rounded, size: 20),
-                            ),
-                          ],
-                        );
-                      },
-                    ),
-                  ),
-                );
-              },
-            )
-          : null,
       bottomNavigationBar: chapterAsync.whenOrNull(
         data: (chapter) {
           final tts = ref.watch(ttsProvider);
           final showMini = tts.contentKey == chapter.id &&
               (tts.status == TtsStatus.playing || tts.status == TtsStatus.paused);
-          if (!showMini) return const SizedBox.shrink();
-
-          return SafeArea(
-            top: false,
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(12, 4, 12, 10),
-              child: TtsPlayerWidget(
-                compact: true,
-                content: chapter.content,
-                contentKey: chapter.id,
-                title: 'Chương ${chapter.number}: ${chapter.title}',
-                nextChapterId: chapter.nextChapterId,
-                chapterNumber: chapter.number,
-                apiBaseUrl: AppConfig.baseUrl,
-              ),
-            ),
+          return ColoredBox(
+            color: readerBackground,
+            child: SafeArea(top: false, child: Column(mainAxisSize: MainAxisSize.min, children: [
+              ValueListenableBuilder<bool>(valueListenable: _showQuickActions,
+                builder: (context, visible, _) => AnimatedSize(
+                  duration: const Duration(milliseconds: 180),
+                  child: !visible ? const SizedBox.shrink() : Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                    decoration: BoxDecoration(border: Border(top: BorderSide(color: readerTextColor.withAlpha(25)))),
+                    child: Row(children: [
+                      IconButton(tooltip: 'Chương trước', color: readerTextColor,
+                        onPressed: chapter.prevChapterId == null ? null : () => _goToPreviousChapter(chapter),
+                        icon: const Icon(Icons.chevron_left_rounded)),
+                      Expanded(child: TextButton.icon(
+                        style: TextButton.styleFrom(foregroundColor: readerTextColor),
+                        onPressed: () => _openChapterToc(chapter),
+                        icon: const Icon(Icons.format_list_bulleted_rounded, size: 20), label: const Text('Mục lục'))),
+                      IconButton(tooltip: 'Về đầu chương', color: readerTextColor,
+                        onPressed: _scrollToTop, icon: const Icon(Icons.vertical_align_top_rounded, size: 20)),
+                      IconButton(tooltip: 'Chương sau', color: readerTextColor,
+                        onPressed: chapter.nextChapterId == null ? null : () => _goToNextChapter(chapter),
+                        icon: const Icon(Icons.chevron_right_rounded)),
+                    ]),
+                  ),
+                )),
+              if (showMini) Padding(
+                padding: const EdgeInsets.fromLTRB(12, 4, 12, 10),
+                child: TtsPlayerWidget(
+                  compact: true, content: chapter.content, contentKey: chapter.id,
+                  title: 'Chương ${chapter.number}: ${chapter.title}',
+                  nextChapterId: chapter.nextChapterId, chapterNumber: chapter.number,
+                  apiBaseUrl: AppConfig.baseUrl,
+                )),
+            ])),
           );
         },
       ),
@@ -1523,7 +1498,7 @@ class _TopBar extends StatelessWidget {
       decoration: BoxDecoration(
         color: barBackgroundColor,
         border: Border(
-          bottom: BorderSide(color: Colors.black.withAlpha(20)),
+          bottom: BorderSide(color: foregroundColor.withAlpha(20)),
         ),
       ),
       child: SafeArea(
@@ -1536,6 +1511,7 @@ class _TopBar extends StatelessWidget {
               children: [
                 IconButton(
                   tooltip: 'Quay lại',
+                  color: foregroundColor,
                   icon: const Icon(Icons.arrow_back_ios_new, size: 18),
                   onPressed: () => Navigator.maybePop(context),
                 ),
@@ -1567,6 +1543,7 @@ class _TopBar extends StatelessWidget {
                 const SizedBox(width: 4),
                 IconButton(
                   tooltip: 'Tùy chỉnh đọc',
+                  color: foregroundColor,
                   icon: const Icon(Icons.tune, size: 20),
                   onPressed: onOpenSettings,
                 ),

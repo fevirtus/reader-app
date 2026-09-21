@@ -3,7 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:cached_network_image/cached_network_image.dart';
+import '../../../shared/widgets/book_cover.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../app/router/route_names.dart';
@@ -20,9 +20,9 @@ import '../providers/novels_provider.dart';
 
 final novelReadProgressProvider =
     FutureProvider.family<Map<String, dynamic>?, String>((ref, novelId) async {
-  final localStore = ref.read(localStoreProvider);
-  return localStore.loadProgress(novelId);
-});
+      final localStore = ref.read(localStoreProvider);
+      return localStore.loadProgress(novelId);
+    });
 
 class NovelDetailScreen extends ConsumerStatefulWidget {
   const NovelDetailScreen({super.key, required this.novelId});
@@ -36,7 +36,8 @@ class NovelDetailScreen extends ConsumerStatefulWidget {
 class _NovelDetailScreenState extends ConsumerState<NovelDetailScreen> {
   static const _kRangeSize = 100;
   static const _kStickyTabHeight = 49.0;
-  static const _kStickyChipsHeight = 94.0; // Computed: title(20) + spacer(8) + chips(40) + padding(18) + buffer(8)
+  static const _kStickyChipsHeight =
+      94.0; // Computed: title(20) + spacer(8) + chips(40) + padding(18) + buffer(8)
 
   static const _kChapterItemExtent = 48.0; // fixed height per chapter row
 
@@ -101,8 +102,21 @@ class _NovelDetailScreenState extends ConsumerState<NovelDetailScreen> {
       ),
       data: (novel) => Scaffold(
         appBar: AppBar(
-          title: Text(novel.title, overflow: TextOverflow.ellipsis, maxLines: 1),
+          title: const Text('Chi tiết truyện'),
           actions: [_DownloadAction(novelId: novel.id)],
+        ),
+        bottomNavigationBar: SafeArea(
+          top: false,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 12),
+            child: _buildReadButton(
+              context: context,
+              novelId: novelId,
+              chaptersAsync: chaptersAsync,
+              readProgressAsync: readProgressAsync,
+              bookshelfAsync: bookshelfAsync,
+            ),
+          ),
         ),
         body: CustomScrollView(
           controller: _scrollController,
@@ -115,13 +129,6 @@ class _NovelDetailScreenState extends ConsumerState<NovelDetailScreen> {
                   Padding(
                     padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
                     child: _NovelInfoCard(novel: novel),
-                  ),
-                  _buildReadButton(
-                    context: context,
-                    novelId: novelId,
-                    chaptersAsync: chaptersAsync,
-                    readProgressAsync: readProgressAsync,
-                    bookshelfAsync: bookshelfAsync,
                   ),
                   const SizedBox(height: 16),
                 ],
@@ -168,62 +175,61 @@ class _NovelDetailScreenState extends ConsumerState<NovelDetailScreen> {
     required AsyncValue<List<BookmarkModel>> bookshelfAsync,
   }) {
     return chaptersAsync.when(
-      loading: () => const SizedBox.shrink(),
-      error: (_, _) => const SizedBox.shrink(),
+      loading: () => const Padding(
+        padding: EdgeInsets.symmetric(horizontal: 24),
+        child: FilledButton(onPressed: null, child: Text('Đang tải mục lục…')),
+      ),
+      error: (_, _) => Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 24),
+        child: OutlinedButton.icon(
+          onPressed: () => ref.invalidate(chapterListProvider(novelId)),
+          icon: const Icon(Icons.refresh_rounded),
+          label: const Text('Tải lại mục lục'),
+        ),
+      ),
       data: (chapters) {
-        final first = chapters.isNotEmpty ? chapters.first : null;
-        if (first == null) return const SizedBox.shrink();
-        final bookmarks = bookshelfAsync.valueOrNull ?? const <BookmarkModel>[];
-        final latestBookmark =
-            bookmarks.where((b) => b.novelId == novelId).firstOrNull;
-        final completed = latestBookmark?.isCompleted ?? false;
+        if (chapters.isEmpty) return const SizedBox.shrink();
+        final bookmark = bookshelfAsync.valueOrNull
+            ?.where((b) => b.novelId == novelId)
+            .firstOrNull;
         final progress = readProgressAsync.valueOrNull;
-        final continueChapterId =
-            latestBookmark?.lastChapterId ?? (progress?['chapterId'] as String?);
-        final continueChapterNumber =
-            latestBookmark?.lastChapterNumber ??
+        final savedId =
+            bookmark?.lastChapterId ?? progress?['chapterId'] as String?;
+        final savedNumber =
+            bookmark?.lastChapterNumber ??
             (progress?['chapterNumber'] as num?)?.toInt();
-        final hasProgress =
-            continueChapterId != null && continueChapterId.isNotEmpty;
-        final targetChapterId = hasProgress ? continueChapterId : first.id;
-        final buttonLabel = hasProgress
-            ? 'Đọc tiếp chương ${continueChapterNumber ?? '?'}'
-            : 'Đọc từ đầu';
+        final completed = bookmark?.isCompleted ?? false;
+        final hasProgress = savedId != null && savedId.isNotEmpty && !completed;
+        final target = hasProgress ? savedId : chapters.first.id;
         return Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
+          padding: const EdgeInsets.symmetric(horizontal: 24),
+          child: Row(
             children: [
-              if (completed)
-                FilledButton.icon(
-                  onPressed: null,
-                  icon: const Icon(Icons.check_circle_outline),
-                  label: const Text('Đã đọc'),
-                  style: FilledButton.styleFrom(
-                    minimumSize: const Size.fromHeight(48),
-                    disabledBackgroundColor: Theme.of(context).colorScheme.surfaceContainerHighest,
-                    disabledForegroundColor: Theme.of(context).colorScheme.onSurfaceVariant,
-                  ),
-                )
-              else
-                FilledButton.icon(
+              Expanded(
+                child: FilledButton.icon(
                   onPressed: () =>
-                      context.push(RouteNames.readerChapter(targetChapterId)),
-                  icon: const Icon(Icons.menu_book),
-                  label: Text(buttonLabel),
+                      context.push(RouteNames.readerChapter(target)),
+                  icon: const Icon(Icons.auto_stories_outlined, size: 20),
+                  label: Text(
+                    completed
+                        ? 'Đọc lại từ đầu'
+                        : hasProgress
+                        ? 'Đọc tiếp · Chương ${savedNumber ?? "?"}'
+                        : 'Bắt đầu đọc',
+                  ),
                   style: FilledButton.styleFrom(
-                    minimumSize: const Size.fromHeight(48),
+                    minimumSize: const Size.fromHeight(52),
                   ),
                 ),
-              if (!completed) ...[
-                const SizedBox(height: 10),
-                OutlinedButton.icon(
-                  onPressed: () => ref.read(bookshelfProvider.notifier).markAsRead(novelId),
-                  icon: const Icon(Icons.check_circle_outline),
-                  label: const Text('Đánh dấu đã đọc'),
-                  style: OutlinedButton.styleFrom(
-                    minimumSize: const Size.fromHeight(44),
-                  ),
+              ),
+              if (!completed && ref.watch(isAuthenticatedProvider)) ...[
+                const SizedBox(width: 12),
+                IconButton.outlined(
+                  tooltip: 'Đánh dấu đã đọc',
+                  onPressed: () =>
+                      ref.read(bookshelfProvider.notifier).markAsRead(novelId),
+                  icon: const Icon(Icons.check_circle_outline_rounded),
+                  style: IconButton.styleFrom(minimumSize: const Size(52, 52)),
                 ),
               ],
             ],
@@ -246,8 +252,16 @@ class _NovelDetailScreenState extends ConsumerState<NovelDetailScreen> {
           content = Padding(
             padding: const EdgeInsets.all(16),
             child: novel.description != null
-                ? Text(novel.description!, style: Theme.of(context).textTheme.bodyMedium)
-                : Text('Chưa có giới thiệu', style: Theme.of(context).textTheme.bodyMedium),
+                ? Text(
+                    novel.description!,
+                    style: Theme.of(
+                      context,
+                    ).textTheme.bodyLarge?.copyWith(height: 1.7),
+                  )
+                : Text(
+                    'Chưa có giới thiệu',
+                    style: Theme.of(context).textTheme.bodyMedium,
+                  ),
           );
         case _NovelDetailTab.ratings:
           content = Padding(
@@ -284,10 +298,9 @@ class _NovelDetailScreenState extends ConsumerState<NovelDetailScreen> {
             padding: const EdgeInsets.all(16),
             child: Text(
               'Không tải được danh sách chương: ${chaptersAsync.error}',
-              style: Theme.of(context)
-                  .textTheme
-                  .bodySmall
-                  ?.copyWith(color: Theme.of(context).colorScheme.error),
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: Theme.of(context).colorScheme.error,
+              ),
             ),
           ),
         ),
@@ -302,15 +315,19 @@ class _NovelDetailScreenState extends ConsumerState<NovelDetailScreen> {
         SliverToBoxAdapter(
           child: Padding(
             padding: const EdgeInsets.all(16),
-            child: Text('Không có chương nào', style: Theme.of(context).textTheme.bodyMedium),
+            child: Text(
+              'Không có chương nào',
+              style: Theme.of(context).textTheme.bodyMedium,
+            ),
           ),
         ),
       ];
     }
 
     final ranges = _buildChapterRanges(sorted);
-    final selIdx =
-        _selectedRangeIndex >= ranges.length ? ranges.length - 1 : _selectedRangeIndex;
+    final selIdx = _selectedRangeIndex >= ranges.length
+        ? ranges.length - 1
+        : _selectedRangeIndex;
 
     final firstChapterForRange = <String, ChapterListItem>{};
     for (final range in ranges) {
@@ -322,8 +339,9 @@ class _NovelDetailScreenState extends ConsumerState<NovelDetailScreen> {
       }
     }
 
-    final visibleRanges =
-        ranges.where((r) => firstChapterForRange.containsKey(r.label)).toList();
+    final visibleRanges = ranges
+        .where((r) => firstChapterForRange.containsKey(r.label))
+        .toList();
 
     // Build first-index map for offset-based scrolling (no GlobalKey per item needed)
     for (var i = 0; i < sorted.length; i++) {
@@ -365,24 +383,21 @@ class _NovelDetailScreenState extends ConsumerState<NovelDetailScreen> {
       // ── Full chapter list (fixed extent để tính offset chính xác) ────
       SliverFixedExtentList(
         itemExtent: _kChapterItemExtent,
-        delegate: SliverChildBuilderDelegate(
-          (context, index) {
-            final ch = sorted[index];
-            return InkWell(
-              onTap: () => context.push(RouteNames.readerChapter(ch.id)),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-                child: Text(
-                  'Chương ${ch.number}: ${ch.title}',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.bodyMedium,
-                ),
+        delegate: SliverChildBuilderDelegate((context, index) {
+          final ch = sorted[index];
+          return InkWell(
+            onTap: () => context.push(RouteNames.readerChapter(ch.id)),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+              child: Text(
+                'Chương ${ch.number}: ${ch.title}',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(context).textTheme.bodyMedium,
               ),
-            );
-          },
-          childCount: sorted.length,
-        ),
+            ),
+          );
+        }, childCount: sorted.length),
       ),
     ];
   }
@@ -394,7 +409,7 @@ class _NovelDetailScreenState extends ConsumerState<NovelDetailScreen> {
 
     // Anchor widget (SliverToBoxAdapter) is always built — context never null
     final anchorCtx = _chapterListAnchorKey.currentContext;
-    if (anchorCtx == null) {
+    if (anchorCtx == null || !anchorCtx.mounted) {
       debugPrint('[ScrollToRange] Anchor context null — unexpected');
       return;
     }
@@ -411,11 +426,16 @@ class _NovelDetailScreenState extends ConsumerState<NovelDetailScreen> {
     // Keep a small gap below pinned sticky headers inside CustomScrollView body.
     const stickyCompensation = _kStickyTabHeight + _kStickyChipsHeight + 8.0;
 
-    final rawTarget = anchorOffset + itemIndex * _kChapterItemExtent - stickyCompensation;
-    final target = rawTarget
-        .clamp(0.0, _scrollController.position.maxScrollExtent);
+    final rawTarget =
+        anchorOffset + itemIndex * _kChapterItemExtent - stickyCompensation;
+    final target = rawTarget.clamp(
+      0.0,
+      _scrollController.position.maxScrollExtent,
+    );
 
-    debugPrint('[ScrollToRange] index=$itemIndex anchorOffset=$anchorOffset target=$target');
+    debugPrint(
+      '[ScrollToRange] index=$itemIndex anchorOffset=$anchorOffset target=$target',
+    );
 
     await _scrollController.animateTo(
       target,
@@ -434,7 +454,6 @@ class _NovelDetailScreenState extends ConsumerState<NovelDetailScreen> {
     }
     return ranges;
   }
-
 }
 
 // ── Nút tải truyện để đọc ngoại tuyến ──────────────────────────────────────────
@@ -448,7 +467,9 @@ class _DownloadAction extends ConsumerWidget {
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Xoá bản tải xuống?'),
-        content: const Text('Các chương đã tải của truyện này sẽ bị xoá khỏi máy.'),
+        content: const Text(
+          'Các chương đã tải của truyện này sẽ bị xoá khỏi máy.',
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(false),
@@ -503,13 +524,19 @@ class _DownloadAction extends ConsumerWidget {
       case 'done':
         return IconButton(
           tooltip: 'Đã tải xuống — bấm để xoá',
-          icon: Icon(Icons.download_done_rounded, color: Theme.of(context).colorScheme.primary),
+          icon: Icon(
+            Icons.download_done_rounded,
+            color: Theme.of(context).colorScheme.primary,
+          ),
           onPressed: () => _confirmDelete(context, ref),
         );
       case 'failed':
         return IconButton(
           tooltip: download.errorMessage ?? 'Tải lỗi — bấm để thử lại',
-          icon: Icon(Icons.error_outline_rounded, color: Theme.of(context).colorScheme.error),
+          icon: Icon(
+            Icons.error_outline_rounded,
+            color: Theme.of(context).colorScheme.error,
+          ),
           onPressed: () => actions.start(novelId),
         );
       case 'paused':
@@ -541,7 +568,7 @@ class _DetailTabs extends StatelessWidget {
     final tabs = [
       (_NovelDetailTab.intro, 'Giới thiệu'),
       (_NovelDetailTab.ratings, 'Đánh giá'),
-      (_NovelDetailTab.chapters, 'Chương'),
+      (_NovelDetailTab.chapters, 'Mục lục'),
     ];
 
     return Row(
@@ -550,18 +577,28 @@ class _DetailTabs extends StatelessWidget {
         return Expanded(
           child: InkWell(
             onTap: () => onChanged(tab.$1),
-            child: Padding(
+            child: Container(
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                border: Border(
+                  bottom: BorderSide(
+                    color: isSelected
+                        ? Theme.of(context).colorScheme.primary
+                        : Colors.transparent,
+                    width: 3,
+                  ),
+                ),
+              ),
               padding: const EdgeInsets.symmetric(vertical: 10),
               child: Text(
                 tab.$2,
                 textAlign: TextAlign.center,
                 style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                      color: isSelected
-                          ? Theme.of(context).colorScheme.primary
-                          : Theme.of(context).colorScheme.onSurfaceVariant,
-                      fontWeight:
-                          isSelected ? FontWeight.w700 : FontWeight.w500,
-                    ),
+                  color: isSelected
+                      ? Theme.of(context).colorScheme.primary
+                      : Theme.of(context).colorScheme.onSurfaceVariant,
+                  fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
+                ),
               ),
             ),
           ),
@@ -595,18 +632,7 @@ class _NovelInfoCard extends StatelessWidget {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        ClipRRect(
-          borderRadius: BorderRadius.circular(8),
-          child: novel.coverUrl != null
-              ? CachedNetworkImage(
-                  imageUrl: novel.coverUrl!,
-                  width: 90,
-                  height: 130,
-                  fit: BoxFit.cover,
-                  errorWidget: (_, _, _) => _placeholder(colorScheme),
-                )
-              : _placeholder(colorScheme),
-        ),
+        BookCover(url: novel.coverUrl, width: 110, height: 162),
         const SizedBox(width: 12),
         Expanded(
           child: Column(
@@ -614,21 +640,24 @@ class _NovelInfoCard extends StatelessWidget {
             children: [
               Text(
                 novel.title,
-                style: textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
-                maxLines: 2,
+                style: textTheme.headlineSmall?.copyWith(height: 1.25),
+                maxLines: 4,
                 overflow: TextOverflow.ellipsis,
               ),
               const SizedBox(height: 4),
               if (novel.authorName.isNotEmpty)
                 Text(
                   novel.authorName,
-                  style: textTheme.bodySmall
-                      ?.copyWith(color: colorScheme.onSurfaceVariant),
+                  style: textTheme.bodySmall?.copyWith(
+                    color: colorScheme.onSurfaceVariant,
+                  ),
                 ),
               const SizedBox(height: 6),
               StatusPill(
                 label: novel.status,
-                tone: isCompleted ? StatusPillTone.success : StatusPillTone.neutral,
+                tone: isCompleted
+                    ? StatusPillTone.success
+                    : StatusPillTone.neutral,
               ),
               const SizedBox(height: 8),
               if (novel.genres.isNotEmpty)
@@ -642,14 +671,16 @@ class _NovelInfoCard extends StatelessWidget {
                 ),
               const SizedBox(height: 8),
               DefaultTextStyle(
-                style: textTheme.bodySmall!
-                    .copyWith(color: colorScheme.onSurfaceVariant),
+                style: textTheme.bodySmall!.copyWith(
+                  color: colorScheme.onSurfaceVariant,
+                ),
                 child: Wrap(
                   spacing: 12,
                   children: [
                     if (novel.totalChapters > 0)
                       Text('${novel.totalChapters} Ch\u01b0\u01a1ng'),
-                    if (novel.views > 0) Text('${_fmt(novel.views)} \u0110\u1ecdc'),
+                    if (novel.views > 0)
+                      Text('${_fmt(novel.views)} \u0110\u1ecdc'),
                     if (novel.rating > 0)
                       Text('${novel.rating.toStringAsFixed(1)}\u2605'),
                   ],
@@ -661,13 +692,6 @@ class _NovelInfoCard extends StatelessWidget {
       ],
     );
   }
-
-  Widget _placeholder(ColorScheme cs) => Container(
-        width: 90,
-        height: 130,
-        color: cs.primaryContainer,
-        child: Icon(Icons.book, color: cs.onPrimaryContainer, size: 36),
-      );
 
   String _fmt(int n) {
     if (n >= 1000000) return '${(n / 1000000).toStringAsFixed(1)}M';
@@ -739,7 +763,9 @@ class _StickyTabDelegate extends SliverPersistentHeaderDelegate {
 
   @override
   bool shouldRebuild(_StickyTabDelegate old) =>
-      old.child != child || old.height != height || old.backgroundColor != backgroundColor;
+      old.child != child ||
+      old.height != height ||
+      old.backgroundColor != backgroundColor;
 }
 
 // ── Sticky range chips delegate ────────────────────────────────────────────────
@@ -784,7 +810,11 @@ class _StickyRangeChipsDelegate extends SliverPersistentHeaderDelegate {
   }
 
   @override
-  Widget build(BuildContext context, double shrinkOffset, bool overlapsContent) {
+  Widget build(
+    BuildContext context,
+    double shrinkOffset,
+    bool overlapsContent,
+  ) {
     final extent = _computeExtent();
     return SizedBox(
       height: extent,

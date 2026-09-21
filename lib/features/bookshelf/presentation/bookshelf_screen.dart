@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:cached_network_image/cached_network_image.dart';
+import '../../../shared/widgets/book_cover.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../app/router/route_names.dart';
@@ -28,21 +28,25 @@ class BookshelfScreen extends ConsumerWidget {
         child: Column(
           children: [
             MainAppHeader(
-              title: 'Đăng truyện',
+              title: 'Tủ sách',
+              subtitle: 'Những câu chuyện bạn đang đồng hành.',
               bottom: Container(
-                height: 42,
+                height: 48,
                 decoration: BoxDecoration(
-                  color: colorScheme.surface,
-                  border: Border(bottom: BorderSide(color: colorScheme.outlineVariant)),
+                  color: colorScheme.surfaceContainerLow,
+                  borderRadius: BorderRadius.circular(14),
                 ),
                 child: TabBar(
-                  indicatorColor: colorScheme.primary,
-                  indicatorWeight: 2.5,
+                  indicatorSize: TabBarIndicatorSize.tab,
+                  indicatorPadding: const EdgeInsets.all(4),
+                  indicator: BoxDecoration(
+                    color: colorScheme.surface,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
                   labelColor: colorScheme.primary,
                   unselectedLabelColor: colorScheme.onSurfaceVariant,
                   dividerColor: Colors.transparent,
-                  isScrollable: true,
-                  tabAlignment: TabAlignment.start,
+                  isScrollable: false,
                   labelStyle: Theme.of(context).textTheme.titleSmall,
                   unselectedLabelStyle: Theme.of(context).textTheme.titleSmall,
                   tabs: const [
@@ -76,7 +80,10 @@ class BookshelfScreen extends ConsumerWidget {
 }
 
 class _AuthGatedBookshelfList extends ConsumerWidget {
-  const _AuthGatedBookshelfList({required this.isAuth, required this.shelfStatus});
+  const _AuthGatedBookshelfList({
+    required this.isAuth,
+    required this.shelfStatus,
+  });
 
   final bool isAuth;
   final ShelfStatus shelfStatus;
@@ -112,7 +119,9 @@ class _AuthGatedBookshelfList extends ConsumerWidget {
           emptyLabel: shelfStatus == ShelfStatus.reading
               ? 'Chưa có truyện đang đọc.'
               : 'Chưa có truyện đã đọc xong.',
-          continueLabel: shelfStatus == ShelfStatus.reading ? 'Đọc tiếp' : 'Đã đọc',
+          continueLabel: shelfStatus == ShelfStatus.reading
+              ? 'Đọc tiếp'
+              : 'Đã đọc',
           showContinueButton: shelfStatus == ShelfStatus.reading,
         );
       },
@@ -142,7 +151,7 @@ class _BookshelfList extends ConsumerWidget {
     return RefreshIndicator(
       onRefresh: () => ref.read(bookshelfProvider.notifier).fetch(),
       child: ListView.separated(
-        padding: const EdgeInsets.fromLTRB(14, 14, 14, 24),
+        padding: const EdgeInsets.fromLTRB(24, 12, 24, 24),
         itemCount: bookmarks.length,
         separatorBuilder: (context, index) => const SizedBox(height: 12),
         itemBuilder: (context, index) {
@@ -199,128 +208,108 @@ class _BookmarkTile extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final novel = bookmark.novel;
-    return GestureDetector(
-      onTap: () => context.push(RouteNames.novelDetail(bookmark.novelId)),
-      child: Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surfaceContainerLow,
-        borderRadius: BorderRadius.circular(18),
+    final t = Theme.of(context);
+    final total = novel?.totalChapters ?? 0;
+    final current = bookmark.lastChapterNumber ?? 0;
+    return Material(
+      color: t.colorScheme.surface,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(20),
+        side: BorderSide(color: t.colorScheme.outlineVariant),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-            Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(20),
+        onTap: () => context.push(RouteNames.novelDetail(bookmark.novelId)),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
             children: [
-              ClipRRect(
-                borderRadius: BorderRadius.circular(10),
-                child: novel?.coverUrl != null
-                    ? CachedNetworkImage(
-                        imageUrl: novel!.coverUrl!,
-                        width: 92,
-                        height: 126,
-                        fit: BoxFit.cover,
-                      )
-                    : Container(
-                        width: 92,
-                        height: 126,
-                        color: Theme.of(context).colorScheme.primaryContainer,
-                        child: const Icon(Icons.menu_book, size: 28),
-                      ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  BookCover(url: novel?.coverUrl, width: 76, height: 110),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Expanded(
-                          child: Text(
-                            novel?.title ?? bookmark.novelId,
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                            style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                                  fontSize: 18,
-                                  fontWeight: FontWeight.w500,
-                                ),
+                        Text(
+                          novel?.title ?? 'Truyện trong tủ sách',
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: t.textTheme.titleSmall,
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          novel?.authorName ?? '',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: t.textTheme.bodySmall?.copyWith(
+                            color: t.colorScheme.onSurfaceVariant,
                           ),
                         ),
-                        const SizedBox(width: 8),
-                          GestureDetector(
-                            onTap: onRemove,
-                            child: const Icon(Icons.close_rounded, size: 20),
+                        const SizedBox(height: 14),
+                        Text(
+                          bookmark.isCompleted
+                              ? 'Đã đọc xong'
+                              : 'Chương $current / ${total > 0 ? total : "—"}',
+                          style: t.textTheme.labelSmall?.copyWith(
+                            color: t.colorScheme.primary,
                           ),
+                        ),
+                        const SizedBox(height: 8),
+                        LinearProgressIndicator(
+                          value: bookmark.isCompleted
+                              ? 1
+                              : total > 0
+                              ? (current / total).clamp(0, 1)
+                              : 0,
+                          minHeight: 4,
+                          borderRadius: BorderRadius.circular(4),
+                          backgroundColor: t.colorScheme.surfaceContainerLow,
+                        ),
                       ],
                     ),
-                    const SizedBox(height: 8),
-                    Text(
-                      'Số chương: ${novel?.totalChapters ?? '--'}',
-                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                            fontWeight: FontWeight.w700,
-                          ),
-                    ),
-                    if (bookmark.shelfStatus == ShelfStatus.completed) ...[
-                      const SizedBox(height: 6),
-                      Text(
-                        bookmark.markedAsRead
-                            ? 'Đánh dấu đã đọc'
-                            : 'Đã đọc ${novel?.totalChapters ?? bookmark.lastChapterNumber} chương',
-                        style: Theme.of(context).textTheme.bodyMedium,
-                      ),
-                    ] else if (bookmark.lastChapterNumber != null) ...[
-                      const SizedBox(height: 6),
-                      Text(
-                        'Đang đọc đến: ${bookmark.lastChapterNumber} / ${novel?.totalChapters ?? '--'}',
-                        style: Theme.of(context).textTheme.bodyMedium,
-                      ),
-                    ],
-                    if (novel?.authorName != null) ...[
-                      const SizedBox(height: 10),
-                      Text(
-                        novel!.authorName,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                              color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Expanded(
+                    child: showContinueButton
+                        ? FilledButton.icon(
+                            onPressed: () => _openContinueReader(context, ref),
+                            icon: const Icon(
+                              Icons.auto_stories_outlined,
+                              size: 18,
                             ),
+                            label: Text(continueLabel),
+                          )
+                        : OutlinedButton(
+                            onPressed: () => context.push(
+                              RouteNames.novelDetail(bookmark.novelId),
+                            ),
+                            child: const Text('Xem truyện'),
+                          ),
+                  ),
+                  const SizedBox(width: 8),
+                  PopupMenuButton<String>(
+                    tooltip: 'Tùy chọn truyện',
+                    onSelected: (_) => onRemove(),
+                    itemBuilder: (_) => [
+                      const PopupMenuItem(
+                        value: 'remove',
+                        child: Text('Bỏ khỏi tủ sách'),
                       ),
                     ],
-                  ],
-                ),
+                    icon: const Icon(Icons.more_horiz_rounded),
+                  ),
+                ],
               ),
             ],
           ),
-          if (showContinueButton) ...[
-            const SizedBox(height: 14),
-            Row(
-              children: [
-                Expanded(
-                  child: FilledButton.icon(
-                    onPressed: () => _openContinueReader(context, ref),
-                    icon: const Icon(Icons.menu_book_rounded),
-                    label: Text(continueLabel),
-                  ),
-                ),
-              ],
-            ),
-          ] else ...[
-            const SizedBox(height: 14),
-            Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton(
-                    onPressed: null,
-                    child: Text(continueLabel),
-                  ),
-                ),
-              ],
-            ),
-          ],
-        ],
-      ),
+        ),
       ),
     );
   }

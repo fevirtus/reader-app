@@ -1,123 +1,113 @@
-# reader-app
+# Reader App
 
-Flutter mobile app for reading novels, synced with the existing web platform.
+Ứng dụng Flutter cho người đọc trong bộ Reader, dùng chung backend `reader-api`
+với web `reader`. Mục tiêu là đồng bộ các tính năng dành cho người đọc; quản trị
+và import EPUB thuộc phạm vi web.
 
-## Scope
+## Phạm vi hiện tại
 
+- Đăng nhập Google; duyệt, tìm kiếm, xem thể loại và chi tiết truyện.
+- Mục lục, đọc chương, rating, tủ sách đang đọc/đã đọc.
+- Lưu tiến độ đọc local và gửi thông tin chương lên backend khi có kết nối.
+- Tùy chỉnh giao diện đọc, đọc bằng TTS.
+- Tải chương, quản lý tải xuống và đọc nội dung đã cache/tải khi offline.
 
-- Full end-user feature parity with the current web app.
-- Excludes all moderator/admin workflows.
+Settings đọc hiện lưu local, chưa đồng bộ `/api/user/settings`.
+Tìm kiếm dùng browse API, chưa tích hợp `/api/truyen/suggest`.
+Vị trí cuộn lưu local; backend hiện lưu tiến độ theo chương, không lưu giá trị
+`progress` mà app gửi. Không có hàng đợi phát lại tiến độ khi request thất bại.
+Bình luận và đề cử không thuộc phạm vi hiện tại.
 
-## Implemented vs planned
+## Cấu trúc
 
-Đã có trong code (theo `lib/features`): đăng nhập Google, home/browse, genres, tìm kiếm, chi tiết truyện + danh sách chương, reader (kèm TTS), bookshelf, bookmark/progress, bình luận, splash/settings.
+- `lib/app/`: khởi tạo app và router.
+- `lib/features/`: auth, home, search, genres, novel, reader, bookshelf, downloads,
+  profile và settings.
+- `lib/core/network/`: Dio và gắn Bearer token.
+- `lib/core/storage/`: secure storage, SharedPreferences và database Drift/SQLite.
+- `lib/core/repositories/`: dữ liệu cache cho truyện, chương, thể loại, tủ sách và tải xuống.
+- `lib/core/download/`, `lib/core/connectivity/`: tải nội dung và theo dõi kết nối.
+- `lib/shared/`: widget dùng chung.
 
-Còn thiếu hoặc mới dạng placeholder so với web: gợi ý tìm kiếm (`/api/truyen/suggest`), đánh giá truyện (`/api/truyen/{id}/rate`), đồng bộ settings và đề cử người dùng (`/api/user/settings`, `/api/user/recommendations`). Chi tiết parity xem `FEATURES.md` và `CROSS_REPO_ENDPOINT_MATRIX.md`.
+App đổi Google ID token lấy JWT qua `POST /api/auth/mobile-login`, lưu token vào
+secure storage và dùng `Authorization: Bearer ...` khi gọi API.
 
-## Architecture
+## Chạy local
 
-- `lib/core`: app-wide config, network, storage, and theme.
-- `lib/features`: feature modules split by domain.
-- `lib/shared`: shared UI widgets.
-
-## Run
+Cần Flutter đi kèm Dart đáp ứng `pubspec.yaml` (hiện `^3.11.3`), SDK của nền tảng
+chạy và backend đã có dữ liệu/schema.
 
 ```bash
 flutter pub get
-flutter run
-```
-
-Run with env file (recommended for local dev):
-
-1. Create local env from sample:
-
-```bash
 cp .env.mobile.example .env.mobile
 ```
 
-1. Start app using env values:
+Sửa `.env.mobile` cho môi trường của bạn:
+
+```dotenv
+BASE_URL=http://10.0.2.2:8000
+GOOGLE_SERVER_CLIENT_ID=your-web-client-id.apps.googleusercontent.com
+GOOGLE_CLIENT_ID=
+```
+
+`GOOGLE_SERVER_CLIENT_ID` là OAuth web/server client ID dùng để lấy Google ID
+token cho backend; backend phải cho phép client ID đó. `GOOGLE_CLIENT_ID` là tùy
+chọn theo nền tảng.
 
 ```bash
 bash scripts/flutter_run_with_env.sh
 ```
 
-This script reads `.env.mobile` and automatically passes:
+Chọn `BASE_URL` theo thiết bị:
 
-- `BASE_URL`
-- `GOOGLE_SERVER_CLIENT_ID`
-- optional `GOOGLE_CLIENT_ID`
+- Android emulator: `http://10.0.2.2:8000`.
+- Simulator/desktop chạy cùng máy API: `http://localhost:8000`.
+- Thiết bị thật: địa chỉ LAN của máy API, hoặc địa chỉ mạng mà thiết bị truy cập được.
+- Android qua USB: chạy `adb reverse tcp:8000 tcp:8000`, rồi dùng
+  `http://127.0.0.1:8000`.
 
-Default `BASE_URL` khi **không** truyền `--dart-define` (xem `lib/core/config/app_config.dart`):
+Nếu không truyền `BASE_URL`, Android native mặc định dùng
+`https://reader-api.fevirtus.dev`, các nền tảng khác dùng `http://localhost:8000`.
+Khi phát triển local nên đặt rõ URL. API chạy bằng service `api-local` của compose
+mở cổng 8001 thay vì 8000.
 
-- Android (native, không phải web build): `https://reader-api.fevirtus.dev`
-- Các nền tảng khác (iOS, desktop, web build, v.v.): `http://localhost:8000`
-
-Để dev local trên Android emulator, luôn set rõ qua `--dart-define` hoặc file `.env.mobile` + `scripts/flutter_run_with_env.sh`, ví dụ `http://10.0.2.2:8000`.
-
-Override trực tiếp:
-
-```bash
-flutter run --dart-define=BASE_URL=http://localhost:8000
-```
-
-For Android emulator, use:
+## Kiểm tra và build
 
 ```bash
-flutter run --dart-define=BASE_URL=http://10.0.2.2:8000
+flutter analyze
+flutter test
 ```
 
-For a physical device in dev, use your computer LAN IP (same Wi-Fi):
+Sau khi thay đổi bảng Drift:
 
 ```bash
-flutter run --dart-define=BASE_URL=http://<YOUR_LAN_IP>:8000
+dart run build_runner build --delete-conflicting-outputs
 ```
 
-Important notes for physical devices:
+Các lệnh này là cách kiểm tra dự án, không phải xác nhận mọi nền tảng đã được
+kiểm thử. Repo có scaffold iOS/desktop/web; cần kiểm tra riêng tính tương thích
+storage, plugin và cấu hình đăng nhập trên từng nền tảng.
 
-- Use the Wi-Fi LAN IP from `en0` (example: `10.17.2.62`).
-- Do NOT use VPN/tunnel IPs from `utun` (example: `100.x.x.x`) unless your phone is connected to the same VPN.
-- Keep phone and computer on the same Wi-Fi network.
+Hai workflow trong `.github/workflows/` build APK/AAB khi push tag `v*` hoặc chạy
+thủ công. Chúng nhận `BASE_URL`, các Google client ID và cấu hình ký từ GitHub
+secrets; xem trực tiếp workflow để biết danh sách biến. Cần đặt `BASE_URL` cho
+release vì workflow hiện fallback về `http://127.0.0.1:8000` nếu thiếu giá trị.
 
-Android over USB (stable local tunnel):
+## Chẩn đoán đăng nhập Android
+
+Khi gặp `ApiException: 10`, kiểm tra package name trong
+`android/app/build.gradle.kts`, cấu hình `google-services.json`, client ID và
+fingerprint của đúng khóa ký debug/release:
 
 ```bash
-adb reverse tcp:8000 tcp:8000
-flutter run --dart-define=BASE_URL=http://127.0.0.1:8000
+bash scripts/google_signin_doctor.sh
+bash scripts/release_signing_doctor.sh
 ```
 
-## Google Sign-In (Android)
+## Tài liệu dùng chung
 
-If you see `PlatformException ... ApiException: 10`, it is usually an OAuth config mismatch.
+Các liên kết dưới đây giả định ba repo được checkout cạnh nhau:
 
-Checklist:
-
-- `android/app/google-services.json` must exist and match package name `com.example.reader_app`.
-- Add SHA-1 and SHA-256 fingerprints of your debug keystore to Firebase Android app settings.
-- Ensure OAuth client IDs are created after adding SHA fingerprints.
-- Run with server/web client id for backend token verification:
-
-```bash
-# Bước 1: Khởi động emulator
-flutter emulators --launch Pixel_8_API_35
-flutter run
-```
-
-```bash
-flutter run \
-  --dart-define=BASE_URL=http://127.0.0.1:8000 \
-  --dart-define=GOOGLE_SERVER_CLIENT_ID=<YOUR_WEB_CLIENT_ID>.apps.googleusercontent.com
-```
-
-Optional (iOS/web):
-
-```bash
---dart-define=GOOGLE_CLIENT_ID=<YOUR_IOS_OR_WEB_CLIENT_ID>.apps.googleusercontent.com
-```
-
-
-Noted:
-
-Với MIUI:
-Cần hướng dẫn user (không thể fix bằng code)
-MIUI AutoStart: User phải vào Cài đặt → Ứng dụng → [app] → AutoStart và bật thủ công
-MIUI Battery Optimization: User phải vào Cài đặt → Pin → Ứng dụng tiêu hao pin → [app] → chọn "Không hạn chế" (permission REQUEST_IGNORE_BATTERY_OPTIMIZATIONS đã có trong Manifest để trigger dialog, nhưng user vẫn phải accept)
+- [Backend và cách chạy](../reader-api/README.md)
+- [API contract hiện tại](../reader-api/CONTRACT.md)
+- [Đối chiếu tính năng web/mobile](../reader-api/CROSS_REPO_ENDPOINT_MATRIX.md)

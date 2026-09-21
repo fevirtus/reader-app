@@ -16,7 +16,8 @@ class SettingsSection extends StatelessWidget {
       margin: const EdgeInsets.only(bottom: AppSpacing.lg),
       padding: const EdgeInsets.all(AppSpacing.lg),
       decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surfaceContainerLow,
+        color: Theme.of(context).colorScheme.surface,
+        border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
         borderRadius: BorderRadius.circular(AppRadius.xl),
       ),
       child: Column(
@@ -61,7 +62,12 @@ class LabeledSlider extends StatelessWidget {
         children: [
           Row(
             children: [
-              Expanded(child: Text(label, style: Theme.of(context).textTheme.labelLarge)),
+              Expanded(
+                child: Text(
+                  label,
+                  style: Theme.of(context).textTheme.labelLarge,
+                ),
+              ),
               Text(valueLabel, style: Theme.of(context).textTheme.labelLarge),
             ],
           ),
@@ -98,8 +104,8 @@ class ColorOptionChip extends StatelessWidget {
       borderRadius: BorderRadius.circular(AppRadius.pill),
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 160),
-        width: 34,
-        height: 34,
+        width: 44,
+        height: 44,
         decoration: BoxDecoration(
           shape: BoxShape.circle,
           color: color,

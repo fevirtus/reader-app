@@ -1,38 +1,35 @@
 import 'package:flutter/material.dart';
 
-/// Token màu cho phong cách "tối giản đơn sắc + một màu nhấn": nền/chữ luôn
-/// là thang xám trung tính (zinc), chỉ duy nhất [lightAccent]/[darkAccent]
-/// (indigo) mang màu — dùng cho nút bấm, trạng thái đang chọn, liên kết.
-/// Light và dark được thiết kế ngang hàng nhau, không ưu tiên bên nào.
+/// Warm paper surfaces with a forest-green accent, shared by light and dark UI.
 class AppColors {
   AppColors._();
 
   // ── Accent (màu nhấn duy nhất) ──────────────────────────────────────────
-  static const lightAccent = Color(0xFF4F46E5); // indigo-600, đủ tương phản trên nền trắng
-  static const darkAccent = Color(0xFF818CF8); // indigo-400, đủ tương phản trên nền tối
+  static const lightAccent = Color(0xFF246451);
+  static const darkAccent = Color(0xFF94D5B6);
   static const lightOnAccent = Color(0xFFFFFFFF);
-  static const darkOnAccent = Color(0xFF1E1B4B);
+  static const darkOnAccent = Color(0xFF103C2E);
   // Nền nút bấm filled ở dark mode dùng tông đậm hơn accent-text để chữ trắng đủ tương phản.
-  static const darkAccentContainer = Color(0xFF4F46E5);
+  static const darkAccentContainer = Color(0xFF246451);
 
-  // ── Trung tính (zinc) ───────────────────────────────────────────────────
-  static const lightBackground = Color(0xFFFAFAFA);
+  // ── Trung tính  ───────────────────────────────────────────────────
+  static const lightBackground = Color(0xFFF8F7F3);
   static const lightSurface = Color(0xFFFFFFFF);
-  static const lightSurfaceLow = Color(0xFFF4F4F5);
-  static const lightSurfaceHigh = Color(0xFFECECEE);
-  static const lightOutline = Color(0xFFE4E4E7);
-  static const lightOutlineVariant = Color(0xFFF0F0F1);
-  static const lightOnSurface = Color(0xFF18181B);
-  static const lightOnSurfaceVariant = Color(0xFF71717A);
+  static const lightSurfaceLow = Color(0xFFF0EFE9);
+  static const lightSurfaceHigh = Color(0xFFE8E7DF);
+  static const lightOutline = Color(0xFFDADDD5);
+  static const lightOutlineVariant = Color(0xFFE8EAE3);
+  static const lightOnSurface = Color(0xFF1D2924);
+  static const lightOnSurfaceVariant = Color(0xFF65716A);
 
-  static const darkBackground = Color(0xFF09090B);
-  static const darkSurface = Color(0xFF18181B);
-  static const darkSurfaceLow = Color(0xFF141416);
-  static const darkSurfaceHigh = Color(0xFF27272A);
-  static const darkOutline = Color(0xFF3F3F46);
-  static const darkOutlineVariant = Color(0xFF27272A);
-  static const darkOnSurface = Color(0xFFFAFAFA);
-  static const darkOnSurfaceVariant = Color(0xFFA1A1AA);
+  static const darkBackground = Color(0xFF101713);
+  static const darkSurface = Color(0xFF1D2924);
+  static const darkSurfaceLow = Color(0xFF19231D);
+  static const darkSurfaceHigh = Color(0xFF2A362F);
+  static const darkOutline = Color(0xFF47564C);
+  static const darkOutlineVariant = Color(0xFF2A362F);
+  static const darkOnSurface = Color(0xFFF8F7F3);
+  static const darkOnSurfaceVariant = Color(0xFFADBAB0);
 
   // ── Ngữ nghĩa (dùng tiết chế, không phải màu nhấn) ───────────────────────
   static const lightSuccess = Color(0xFF16A34A);
