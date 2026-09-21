@@ -89,9 +89,26 @@ kiểm thử. Repo có scaffold iOS/desktop/web; cần kiểm tra riêng tính t
 storage, plugin và cấu hình đăng nhập trên từng nền tảng.
 
 Hai workflow trong `.github/workflows/` build APK/AAB khi push tag `v*` hoặc chạy
-thủ công. Chúng nhận `BASE_URL`, các Google client ID và cấu hình ký từ GitHub
-secrets; xem trực tiếp workflow để biết danh sách biến. Cần đặt `BASE_URL` cho
-release vì workflow hiện fallback về `http://127.0.0.1:8000` nếu thiếu giá trị.
+thủ công. Chúng dùng Flutter 3.41.5 / Dart 3.11.3, Java 21 và Android SDK có sẵn
+trên Ubuntu 24.04, cache Flutter/pub/Gradle và cài SDK 36 cùng NDK tương ứng.
+`BASE_URL` mặc định là `https://reader-api.fevirtus.dev`; secret cùng tên có thể
+ghi đè bằng một URL HTTPS khác. Google client ID lấy từ secrets như trước.
+
+Để tạo file cho Google Play, chọn **Actions → Build Android AAB → Run workflow**:
+
+- Có thể để trống `release_tag`: file vẫn được lưu trong **Artifacts** của lần
+  chạy trong 14 ngày. Giải nén artifact và tải file `.aab` lên Play Console.
+- `build_number` ghi đè Android `versionCode`; phải lớn hơn mã đã tải lên Play.
+  Nếu để trống, dùng phần sau dấu `+` trong `pubspec.yaml`. Chạy lại workflow
+  không tự tăng versionCode; `release_tag` cũng không thay đổi phiên bản ứng dụng.
+- Khi có `release_tag`, workflow còn đính kèm file vào GitHub Release.
+- Secrets ký bắt buộc: `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`,
+  `ANDROID_KEY_PASSWORD`. `ANDROID_KEY_ALIAS` có thể để trống để lấy alias đầu tiên.
+- `EXPECTED_ANDROID_SHA1` (nếu đặt) phải là SHA-1 của **upload key** đã đăng ký
+  trong Play Console, không phải app-signing key do Google dùng để phân phối app.
+
+Workflow kiểm tra chữ ký trước khi lưu artifact và xóa file khóa sau khi chạy.
+Workflow không tự upload hay phát hành ứng dụng lên Google Play.
 
 ## Chẩn đoán đăng nhập Android
 
