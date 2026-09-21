@@ -7,10 +7,10 @@ on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: "Release tag (example: v1.0.10)"
+        description: "Nhãn GitHub Release, ví dụ v1.0.3.10 (có thể để trống)"
         required: false
       build_number:
-        description: "Android versionCode override; must exceed the version already uploaded to Play"
+        description: "Chỉ nhập SỐ NGUYÊN, ví dụ 11; không nhập v1.0.3.10. Để trống để dùng pubspec.yaml"
         required: false
         type: string
 
@@ -41,6 +41,34 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
+
+      - name: Resolve release tag input
+        run: |
+          RESOLVED_TAG=""
+
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ] && [ -n "${INPUT_RELEASE_TAG:-}" ]; then
+            RESOLVED_TAG="${INPUT_RELEASE_TAG}"
+          elif [[ "${GITHUB_REF:-}" == refs/tags/* ]]; then
+            RESOLVED_TAG="${GITHUB_REF#refs/tags/}"
+          fi
+
+          if [ -n "$RESOLVED_TAG" ] && [[ ! "$RESOLVED_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.+-][A-Za-z0-9.-]+)?$ ]]; then
+            echo "::error::release_tag must be a version such as v1.0.3"
+            exit 1
+          fi
+          if [ -n "$INPUT_BUILD_NUMBER" ] && [[ ! "$INPUT_BUILD_NUMBER" =~ ^[1-9][0-9]{0,9}$ ]]; then
+            echo "::error::build_number must be an integer such as 11, NOT a version tag such as v1.0.3.10. Leave it empty to use pubspec.yaml."
+            exit 1
+          fi
+          if [ -n "$INPUT_BUILD_NUMBER" ] && [ "$INPUT_BUILD_NUMBER" -gt 2100000000 ]; then
+            echo "::error::build_number exceeds Google Play's limit"
+            exit 1
+          fi
+
+          echo "RELEASE_TAG=${RESOLVED_TAG}" >> "$GITHUB_ENV"
+          echo "Resolved RELEASE_TAG=${RESOLVED_TAG:-<empty>}"
+        env:
+          INPUT_RELEASE_TAG: ${{ github.event.inputs.release_tag }}
 
       - name: Setup Java
         uses: actions/setup-java@v5
@@ -85,34 +113,6 @@ jobs:
 
       - name: Install dependencies
         run: flutter pub get --enforce-lockfile
-
-      - name: Resolve release tag input
-        run: |
-          RESOLVED_TAG=""
-
-          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ] && [ -n "${INPUT_RELEASE_TAG:-}" ]; then
-            RESOLVED_TAG="${INPUT_RELEASE_TAG}"
-          elif [[ "${GITHUB_REF:-}" == refs/tags/* ]]; then
-            RESOLVED_TAG="${GITHUB_REF#refs/tags/}"
-          fi
-
-          if [ -n "$RESOLVED_TAG" ] && [[ ! "$RESOLVED_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.+-][A-Za-z0-9.-]+)?$ ]]; then
-            echo "::error::release_tag must be a version such as v1.0.3"
-            exit 1
-          fi
-          if [ -n "$INPUT_BUILD_NUMBER" ] && [[ ! "$INPUT_BUILD_NUMBER" =~ ^[1-9][0-9]{0,9}$ ]]; then
-            echo "::error::build_number must be a positive Android versionCode"
-            exit 1
-          fi
-          if [ -n "$INPUT_BUILD_NUMBER" ] && [ "$INPUT_BUILD_NUMBER" -gt 2100000000 ]; then
-            echo "::error::build_number exceeds Google Play's limit"
-            exit 1
-          fi
-
-          echo "RELEASE_TAG=${RESOLVED_TAG}" >> "$GITHUB_ENV"
-          echo "Resolved RELEASE_TAG=${RESOLVED_TAG:-<empty>}"
-        env:
-          INPUT_RELEASE_TAG: ${{ github.event.inputs.release_tag }}
 
       - name: Prepare Android release signing
         run: |
