@@ -12,6 +12,8 @@ import '../../../core/config/app_config.dart';
 import '../../../core/models/chapter_model.dart';
 import '../../../core/models/reading_settings.dart';
 import '../../../core/storage/local_store.dart';
+import '../../../core/theme/app_colors.dart';
+import '../../../shared/widgets/settings_controls.dart';
 import '../../novel/providers/novels_provider.dart';
 import '../providers/reader_provider.dart';
 import '../tts/tts_service.dart';
@@ -790,7 +792,7 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
                                       ),
                                       padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
                                       children: [
-                                        _SettingsSection(
+                                        SettingsSection(
                                           title: 'Kiểu chữ',
                                           child: Column(
                                             crossAxisAlignment: CrossAxisAlignment.start,
@@ -811,7 +813,7 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
                                                 ),
                                               ),
                                               const SizedBox(height: 12),
-                                              _LabeledSlider(
+                                              LabeledSlider(
                                                 label: 'Cỡ chữ',
                                                 valueLabel: settings.fontSize.toStringAsFixed(0),
                                                 min: 12,
@@ -820,7 +822,7 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
                                                 value: settings.fontSize,
                                                 onChanged: (v) => update(settings.copyWith(fontSize: v)),
                                               ),
-                                              _LabeledSlider(
+                                              LabeledSlider(
                                                 label: 'Giãn dòng',
                                                 valueLabel: settings.lineHeight.toStringAsFixed(1),
                                                 min: 1.2,
@@ -829,7 +831,7 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
                                                 value: settings.lineHeight,
                                                 onChanged: (v) => update(settings.copyWith(lineHeight: v)),
                                               ),
-                                              _LabeledSlider(
+                                              LabeledSlider(
                                                 label: 'Khoảng cách chữ',
                                                 valueLabel: settings.letterSpacing.toStringAsFixed(1),
                                                 min: 0,
@@ -849,7 +851,7 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
                                       ),
                                       padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
                                       children: [
-                                        _SettingsSection(
+                                        SettingsSection(
                                           title: 'Giao diện đọc',
                                           child: Column(
                                             crossAxisAlignment: CrossAxisAlignment.start,
@@ -863,11 +865,11 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
                                                 spacing: 10,
                                                 runSpacing: 10,
                                                 children: _backgroundColorChoices.map((color) {
-                                                  return _ColorOptionChip(
+                                                  return ColorOptionChip(
                                                     color: color,
-                                                    selected: settings.backgroundColorValue == color.value,
+                                                    selected: settings.backgroundColorValue == color.toARGB32(),
                                                     onTap: () => update(
-                                                      settings.copyWith(backgroundColorValue: color.value),
+                                                      settings.copyWith(backgroundColorValue: color.toARGB32()),
                                                     ),
                                                   );
                                                 }).toList(),
@@ -882,11 +884,11 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
                                                 spacing: 10,
                                                 runSpacing: 10,
                                                 children: _textColorChoices.map((color) {
-                                                  return _ColorOptionChip(
+                                                  return ColorOptionChip(
                                                     color: color,
-                                                    selected: settings.textColorValue == color.value,
+                                                    selected: settings.textColorValue == color.toARGB32(),
                                                     onTap: () => update(
-                                                      settings.copyWith(textColorValue: color.value),
+                                                      settings.copyWith(textColorValue: color.toARGB32()),
                                                     ),
                                                   );
                                                 }).toList(),
@@ -902,7 +904,7 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
                                       ),
                                       padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
                                       children: [
-                                        _SettingsSection(
+                                        SettingsSection(
                                           title: 'Bố cục trang',
                                           child: Column(
                                             crossAxisAlignment: CrossAxisAlignment.start,
@@ -919,7 +921,7 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
                                                 onSelectionChanged: (s) => update(settings.copyWith(textAlign: s.first)),
                                               ),
                                               const SizedBox(height: 12),
-                                              _LabeledSlider(
+                                              LabeledSlider(
                                                 label: 'Lề ngang',
                                                 valueLabel: settings.horizontalPadding.toStringAsFixed(0),
                                                 min: 12,
@@ -928,7 +930,7 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
                                                 value: settings.horizontalPadding,
                                                 onChanged: (v) => update(settings.copyWith(horizontalPadding: v)),
                                               ),
-                                              _LabeledSlider(
+                                              LabeledSlider(
                                                 label: 'Khoảng cách đoạn',
                                                 valueLabel: settings.paragraphSpacing.toStringAsFixed(0),
                                                 min: 8,
@@ -948,7 +950,7 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
                                       ),
                                       padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
                                       children: [
-                                        _SettingsSection(
+                                        SettingsSection(
                                           title: 'TTS tiếng Việt',
                                           child: Column(
                                             crossAxisAlignment: CrossAxisAlignment.start,
@@ -1033,7 +1035,7 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
                                                               : Icons.radio_button_unchecked,
                                                           size: 18,
                                                           color: tts.backgroundModeEnabled
-                                                              ? Colors.green
+                                                              ? _successColor(context)
                                                               : Theme.of(context)
                                                                   .colorScheme
                                                                   .onSurfaceVariant,
@@ -1055,7 +1057,7 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
                                                               : Icons.radio_button_unchecked,
                                                           size: 18,
                                                           color: tts.batteryOptimizationIgnored
-                                                              ? Colors.green
+                                                              ? _successColor(context)
                                                               : Theme.of(context)
                                                                   .colorScheme
                                                                   .onSurfaceVariant,
@@ -1577,6 +1579,12 @@ class _TopBar extends StatelessWidget {
   }
 }
 
+Color _successColor(BuildContext context) {
+  return Theme.of(context).brightness == Brightness.dark
+      ? AppColors.darkSuccess
+      : AppColors.lightSuccess;
+}
+
 String? _resolveReaderFontFamily(String fontFamily) {
   switch (fontFamily) {
     case 'serif':
@@ -1589,123 +1597,6 @@ String? _resolveReaderFontFamily(String fontFamily) {
     case 'sans':
     default:
       return null;
-  }
-}
-
-class _SettingsSection extends StatelessWidget {
-  const _SettingsSection({required this.title, required this.child});
-
-  final String title;
-  final Widget child;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 16),
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surfaceContainerLowest,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(title, style: Theme.of(context).textTheme.titleMedium),
-          const SizedBox(height: 12),
-          child,
-        ],
-      ),
-    );
-  }
-}
-
-class _LabeledSlider extends StatelessWidget {
-  const _LabeledSlider({
-    required this.label,
-    required this.valueLabel,
-    required this.min,
-    required this.max,
-    required this.divisions,
-    required this.value,
-    required this.onChanged,
-  });
-
-  final String label;
-  final String valueLabel;
-  final double min;
-  final double max;
-  final int divisions;
-  final double value;
-  final ValueChanged<double> onChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 10),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Expanded(child: Text(label, style: Theme.of(context).textTheme.labelLarge)),
-              Text(valueLabel, style: Theme.of(context).textTheme.labelLarge),
-            ],
-          ),
-          Slider(
-            min: min,
-            max: max,
-            divisions: divisions,
-            value: value,
-            onChanged: onChanged,
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _ColorOptionChip extends StatelessWidget {
-  const _ColorOptionChip({
-    required this.color,
-    required this.selected,
-    required this.onTap,
-  });
-
-  final Color color;
-  final bool selected;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(999),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 160),
-        width: 34,
-        height: 34,
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          color: color,
-          border: Border.all(
-            color: selected
-                ? Theme.of(context).colorScheme.primary
-                : Theme.of(context).colorScheme.outlineVariant,
-            width: selected ? 3 : 1,
-          ),
-          boxShadow: selected
-              ? [
-                  BoxShadow(
-                    color: Theme.of(context).colorScheme.primary.withAlpha(60),
-                    blurRadius: 8,
-                    spreadRadius: 1,
-                  ),
-                ]
-              : null,
-        ),
-      ),
-    );
   }
 }
 

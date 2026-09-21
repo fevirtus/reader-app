@@ -63,7 +63,7 @@ class MainAppHeader extends StatelessWidget {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: theme.textTheme.titleMedium?.copyWith(
-                      color: const Color(0xFF15B8A6),
+                      color: colorScheme.onSurface,
                       fontWeight: FontWeight.w600,
                     ),
                   ),
@@ -75,7 +75,7 @@ class MainAppHeader extends StatelessWidget {
                     visualDensity: VisualDensity.compact,
                     onPressed: () => context.go(RouteNames.search),
                     icon: const Icon(Icons.search_rounded),
-                    color: const Color(0xFF15B8A6),
+                    color: colorScheme.onSurface,
                   ),
               ],
             ),

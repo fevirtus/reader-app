@@ -88,10 +88,6 @@ class ProfileScreen extends ConsumerWidget {
                                     onPressed: () {},
                                     icon: const Icon(Icons.workspace_premium_rounded),
                                     label: const Text('Thêm Tiên Thạch'),
-                                    style: FilledButton.styleFrom(
-                                      backgroundColor: const Color(0xFF14B8A6),
-                                      foregroundColor: Colors.white,
-                                    ),
                                   ),
                                 ],
                               ),
@@ -170,7 +166,7 @@ class _AccountStatRow extends StatelessWidget {
   Widget build(BuildContext context) {
     return Row(
       children: [
-        Icon(icon, size: 18, color: const Color(0xFF58D68D)),
+        Icon(icon, size: 18, color: Theme.of(context).colorScheme.onSurfaceVariant),
         const SizedBox(width: 8),
         Expanded(child: Text(label, style: Theme.of(context).textTheme.titleMedium)),
       ],

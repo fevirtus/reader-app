@@ -1,16 +1,48 @@
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../../core/connectivity/connectivity_service.dart';
 import '../../../core/models/bookmark_model.dart';
 import '../../../core/network/providers.dart';
+import '../../../core/repositories/bookshelf_repository.dart';
+import '../../auth/providers/auth_provider.dart';
 
 class BookshelfNotifier extends StateNotifier<AsyncValue<List<BookmarkModel>>> {
   final Ref _ref;
 
   BookshelfNotifier(this._ref) : super(const AsyncValue.loading()) {
-    fetch();
+    _loadFromCacheThenSync();
+  }
+
+  Future<void> _loadFromCacheThenSync() async {
+    final repo = _ref.read(bookshelfRepositoryProvider);
+    final cached = await repo.loadCached();
+    if (cached.isNotEmpty) {
+      state = AsyncValue.data(cached);
+    } else {
+      // Tủ sách gắn với tài khoản — chưa đăng nhập thì chưa có gì để tải, không phải lỗi.
+      state = const AsyncValue.data([]);
+    }
+
+    if (!_ref.read(isAuthenticatedProvider)) return;
+
+    final online = await _ref.read(connectivityServiceProvider).checkIsOnline();
+    if (online) {
+      await fetch();
+    } else if (cached.isEmpty) {
+      state = AsyncValue.error(
+        Exception('Không có mạng và chưa có dữ liệu tủ sách đã lưu'),
+        StackTrace.current,
+      );
+    }
   }
 
   Future<void> fetch() async {
-    state = const AsyncValue.loading();
+    // Bookmarks gắn với tài khoản — bỏ qua thay vì gọi API và bị 401 khi chưa đăng nhập.
+    if (!_ref.read(isAuthenticatedProvider)) return;
+    // Giữ dữ liệu cache hiển thị trong lúc gọi mạng — chỉ hiện loading khi chưa có gì.
+    final hadData = state.valueOrNull?.isNotEmpty ?? false;
+    if (!hadData) state = const AsyncValue.loading();
     try {
       final client = _ref.read(apiClientProvider);
       final res = await client.dio.get('/api/user/bookmarks');
@@ -18,8 +50,17 @@ class BookshelfNotifier extends StateNotifier<AsyncValue<List<BookmarkModel>>> {
           .map((e) => BookmarkModel.fromJson(e as Map<String, dynamic>))
           .toList();
       state = AsyncValue.data(list);
+      unawaited(_ref.read(bookshelfRepositoryProvider).replaceAll(list));
     } catch (e, st) {
-      state = AsyncValue.error(e, st);
+      if (!hadData) state = AsyncValue.error(e, st);
+      // Nếu đã có cache thì giữ nguyên, coi như "chưa cập nhật được, vẫn xem tạm bản cũ".
+    }
+  }
+
+  void _persistCurrent() {
+    final current = state.valueOrNull;
+    if (current != null) {
+      unawaited(_ref.read(bookshelfRepositoryProvider).replaceAll(current));
     }
   }
 
@@ -56,11 +97,13 @@ class BookshelfNotifier extends StateNotifier<AsyncValue<List<BookmarkModel>>> {
 
       final updated = [...current]..[index] = merged;
       state = AsyncValue.data(updated);
+      _persistCurrent();
       return;
     }
 
     if (parsedFromServer != null) {
       state = AsyncValue.data([parsedFromServer, ...current]);
+      _persistCurrent();
       return;
     }
 
@@ -75,6 +118,7 @@ class BookshelfNotifier extends StateNotifier<AsyncValue<List<BookmarkModel>>> {
       readChapters: [chapterNumber],
     );
     state = AsyncValue.data([synthetic, ...current]);
+    _persistCurrent();
   }
 
   Future<void> markAsRead(String novelId) async {
@@ -96,6 +140,7 @@ class BookshelfNotifier extends StateNotifier<AsyncValue<List<BookmarkModel>>> {
         } else {
           state = AsyncValue.data([updated, ...current]);
         }
+        _persistCurrent();
       } else {
         await fetch();
       }
@@ -116,6 +161,7 @@ class BookshelfNotifier extends StateNotifier<AsyncValue<List<BookmarkModel>>> {
       state = AsyncValue.data(
         current.where((b) => b.novelId != novelId).toList(),
       );
+      _persistCurrent();
     } catch (e, st) {
       state = AsyncValue.error(e, st);
     }

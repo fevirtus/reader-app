@@ -3,86 +3,188 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../app/router/route_names.dart';
+import '../../../core/models/reading_settings.dart';
+import '../../../core/theme/app_spacing.dart';
+import '../../../shared/widgets/settings_controls.dart';
 import '../../auth/providers/auth_provider.dart';
-import '../providers/settings_provider.dart';
+import '../../reader/providers/reader_provider.dart';
 
+/// Cùng dùng [readingSettingsProvider] với bảng tuỳ chỉnh nhanh trong Reader —
+/// đổi ở đâu cũng đồng bộ ngay, không còn 2 nguồn cài đặt lệch nhau.
 class SettingsScreen extends ConsumerWidget {
   const SettingsScreen({super.key});
 
+  static const _backgroundColorChoices = [
+    Color(0xFFFFFEF8),
+    Color(0xFFF6EAD7),
+    Color(0xFF101418),
+    Color(0xFFF3F7FF),
+    Color(0xFFF6FFF5),
+  ];
+
+  static const _textColorChoices = [
+    Color(0xFF111111),
+    Color(0xFF2C1E12),
+    Color(0xFFE6EAF2),
+    Color(0xFF1F2A44),
+    Color(0xFF0F5132),
+  ];
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final settingsAsync = ref.watch(userSettingsProvider);
+    final settings = ref.watch(readingSettingsProvider);
+    final notifier = ref.read(readingSettingsProvider.notifier);
     final isAuth = ref.watch(isAuthenticatedProvider);
+    final colorScheme = Theme.of(context).colorScheme;
+
+    Future<void> update(ReadingSettings next) => notifier.update(next);
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Cài đặt đọc')),
-      body: settingsAsync.when(
-        loading: () => const Center(child: CircularProgressIndicator()),
-        error: (e, _) => Center(child: Text('Lỗi: $e')),
-        data: (settings) => ListView(
-          padding: const EdgeInsets.all(20),
-          children: [
-            Text('Cỡ chữ: ${settings.fontSize.toStringAsFixed(0)}',
-                style: Theme.of(context).textTheme.titleSmall),
-            Slider(
-              min: 12,
-              max: 28,
-              divisions: 8,
-              value: settings.fontSize,
-              onChanged: (v) => ref
-                  .read(userSettingsProvider.notifier)
-                  .updateSettings(settings.copyWith(fontSize: v)),
-            ),
-            const SizedBox(height: 8),
-            Text('Khoảng cách dòng: ${settings.lineHeight.toStringAsFixed(1)}',
-                style: Theme.of(context).textTheme.titleSmall),
-            Slider(
-              min: 1.2,
-              max: 3.0,
-              divisions: 9,
-              value: settings.lineHeight,
-              onChanged: (v) => ref
-                  .read(userSettingsProvider.notifier)
-                  .updateSettings(settings.copyWith(lineHeight: v)),
-            ),
-            const SizedBox(height: 8),
-            Text('Khoảng cách chữ: ${settings.letterSpacing.toStringAsFixed(1)}',
-                style: Theme.of(context).textTheme.titleSmall),
-            Slider(
-              min: 0,
-              max: 4,
-              divisions: 8,
-              value: settings.letterSpacing,
-              onChanged: (v) => ref
-                  .read(userSettingsProvider.notifier)
-                  .updateSettings(settings.copyWith(letterSpacing: v)),
-            ),
-            const SizedBox(height: 8),
-            Text('Font chữ', style: Theme.of(context).textTheme.titleSmall),
-            const SizedBox(height: 8),
-            SegmentedButton<String>(
-              segments: const [
-                ButtonSegment(value: 'serif', label: Text('Serif')),
-                ButtonSegment(value: 'sans', label: Text('Sans-serif')),
-                ButtonSegment(value: 'mono', label: Text('Mono')),
+      appBar: AppBar(
+        title: const Text('Cài đặt đọc'),
+        actions: [
+          TextButton(
+            onPressed: () => update(const ReadingSettings()),
+            child: const Text('Mặc định'),
+          ),
+        ],
+      ),
+      body: ListView(
+        padding: const EdgeInsets.all(AppSpacing.lg),
+        children: [
+          SettingsSection(
+            title: 'Kiểu chữ',
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                SegmentedButton<String>(
+                  segments: const [
+                    ButtonSegment(value: 'serif', label: Text('Có chân')),
+                    ButtonSegment(value: 'sans', label: Text('Không chân')),
+                    ButtonSegment(value: 'mono', label: Text('Đơn cách')),
+                  ],
+                  selected: {settings.fontFamily},
+                  onSelectionChanged: (s) => update(settings.copyWith(fontFamily: s.first)),
+                ),
+                const SizedBox(height: AppSpacing.md),
+                LabeledSlider(
+                  label: 'Cỡ chữ',
+                  valueLabel: settings.fontSize.toStringAsFixed(0),
+                  min: 12,
+                  max: 32,
+                  divisions: 10,
+                  value: settings.fontSize,
+                  onChanged: (v) => update(settings.copyWith(fontSize: v)),
+                ),
+                LabeledSlider(
+                  label: 'Giãn dòng',
+                  valueLabel: settings.lineHeight.toStringAsFixed(1),
+                  min: 1.2,
+                  max: 3.0,
+                  divisions: 9,
+                  value: settings.lineHeight,
+                  onChanged: (v) => update(settings.copyWith(lineHeight: v)),
+                ),
+                LabeledSlider(
+                  label: 'Khoảng cách chữ',
+                  valueLabel: settings.letterSpacing.toStringAsFixed(1),
+                  min: 0,
+                  max: 4,
+                  divisions: 8,
+                  value: settings.letterSpacing,
+                  onChanged: (v) => update(settings.copyWith(letterSpacing: v)),
+                ),
               ],
-              selected: {settings.fontFamily},
-              onSelectionChanged: (s) => ref
-                  .read(userSettingsProvider.notifier)
-                  .updateSettings(settings.copyWith(fontFamily: s.first)),
             ),
-            const Divider(height: 40),
-            // Preview
-            Container(
-              padding: const EdgeInsets.all(16),
+          ),
+          SettingsSection(
+            title: 'Giao diện đọc',
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Màu nền', style: Theme.of(context).textTheme.labelLarge),
+                const SizedBox(height: AppSpacing.sm),
+                Wrap(
+                  spacing: AppSpacing.sm,
+                  runSpacing: AppSpacing.sm,
+                  children: _backgroundColorChoices
+                      .map((color) => ColorOptionChip(
+                            color: color,
+                            selected: settings.backgroundColorValue == color.toARGB32(),
+                            onTap: () => update(settings.copyWith(backgroundColorValue: color.toARGB32())),
+                          ))
+                      .toList(),
+                ),
+                const SizedBox(height: AppSpacing.md),
+                Text('Màu chữ', style: Theme.of(context).textTheme.labelLarge),
+                const SizedBox(height: AppSpacing.sm),
+                Wrap(
+                  spacing: AppSpacing.sm,
+                  runSpacing: AppSpacing.sm,
+                  children: _textColorChoices
+                      .map((color) => ColorOptionChip(
+                            color: color,
+                            selected: settings.textColorValue == color.toARGB32(),
+                            onTap: () => update(settings.copyWith(textColorValue: color.toARGB32())),
+                          ))
+                      .toList(),
+                ),
+              ],
+            ),
+          ),
+          SettingsSection(
+            title: 'Bố cục trang',
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Canh chữ', style: Theme.of(context).textTheme.labelLarge),
+                const SizedBox(height: AppSpacing.sm),
+                SegmentedButton<String>(
+                  segments: const [
+                    ButtonSegment(value: 'left', label: Text('Trái')),
+                    ButtonSegment(value: 'justify', label: Text('Đều')),
+                    ButtonSegment(value: 'center', label: Text('Giữa')),
+                  ],
+                  selected: {settings.textAlign},
+                  onSelectionChanged: (s) => update(settings.copyWith(textAlign: s.first)),
+                ),
+                const SizedBox(height: AppSpacing.md),
+                LabeledSlider(
+                  label: 'Lề ngang',
+                  valueLabel: settings.horizontalPadding.toStringAsFixed(0),
+                  min: 12,
+                  max: 36,
+                  divisions: 8,
+                  value: settings.horizontalPadding,
+                  onChanged: (v) => update(settings.copyWith(horizontalPadding: v)),
+                ),
+                LabeledSlider(
+                  label: 'Khoảng cách đoạn',
+                  valueLabel: settings.paragraphSpacing.toStringAsFixed(0),
+                  min: 8,
+                  max: 36,
+                  divisions: 7,
+                  value: settings.paragraphSpacing,
+                  onChanged: (v) => update(settings.copyWith(paragraphSpacing: v)),
+                ),
+              ],
+            ),
+          ),
+          SettingsSection(
+            title: 'Xem trước',
+            child: Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(AppSpacing.md),
               decoration: BoxDecoration(
-                border: Border.all(
-                    color: Theme.of(context).colorScheme.outlineVariant),
-                borderRadius: BorderRadius.circular(12),
+                color: Color(settings.backgroundColorValue),
+                borderRadius: BorderRadius.circular(AppRadius.md),
+                border: Border.all(color: colorScheme.outlineVariant),
               ),
               child: Text(
                 'Đây là đoạn văn mẫu để xem trước cài đặt hiển thị chữ của bạn.',
+                textAlign: settings.textAlign == 'center' ? TextAlign.center : TextAlign.left,
                 style: TextStyle(
+                  color: Color(settings.textColorValue),
                   fontSize: settings.fontSize,
                   height: settings.lineHeight,
                   letterSpacing: settings.letterSpacing,
@@ -90,19 +192,24 @@ class SettingsScreen extends ConsumerWidget {
                 ),
               ),
             ),
-            const Divider(height: 40),
-            if (isAuth)
-              ListTile(
-                leading: const Icon(Icons.logout, color: Colors.red),
-                title: const Text('Đăng xuất',
-                    style: TextStyle(color: Colors.red)),
-                onTap: () async {
-                  await ref.read(authProvider.notifier).signOut();
-                  if (context.mounted) context.go(RouteNames.home);
-                },
+          ),
+          if (isAuth)
+            SettingsSection(
+              title: 'Tài khoản',
+              child: SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: () async {
+                    await ref.read(authProvider.notifier).signOut();
+                    if (context.mounted) context.go(RouteNames.home);
+                  },
+                  icon: Icon(Icons.logout_rounded, color: colorScheme.error),
+                  label: Text('Đăng xuất', style: TextStyle(color: colorScheme.error)),
+                  style: OutlinedButton.styleFrom(side: BorderSide(color: colorScheme.error)),
+                ),
               ),
-          ],
-        ),
+            ),
+        ],
       ),
     );
   }

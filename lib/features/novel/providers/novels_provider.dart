@@ -1,8 +1,12 @@
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/connectivity/connectivity_service.dart';
 import '../../../core/models/novel_model.dart';
 import '../../../core/models/chapter_model.dart';
 import '../../../core/network/providers.dart';
+import '../../../core/repositories/novels_repository.dart';
 
 // ─── Browse / Search ──────────────────────────────────────────────────────────
 
@@ -180,9 +184,25 @@ final novelsProvider = StateNotifierProvider<NovelsNotifier, AsyncValue<BrowseRe
 
 final novelDetailProvider =
     FutureProvider.family<NovelModel, String>((ref, idOrSlug) async {
-  final client = ref.read(apiClientProvider);
-  final res = await client.dio.get('/api/novels/$idOrSlug');
-  return NovelModel.fromJson(res.data as Map<String, dynamic>);
+  final repo = ref.read(novelsRepositoryProvider);
+  final cached = await repo.getCachedNovel(idOrSlug);
+
+  final online = await ref.read(connectivityServiceProvider).checkIsOnline();
+  if (!online) {
+    if (cached != null) return cached;
+    throw Exception('Không có mạng và chưa có dữ liệu đã lưu cho truyện này');
+  }
+
+  try {
+    final client = ref.read(apiClientProvider);
+    final res = await client.dio.get('/api/novels/$idOrSlug');
+    final novel = NovelModel.fromJson(res.data as Map<String, dynamic>);
+    unawaited(repo.saveNovelDetail(novel));
+    return novel;
+  } catch (_) {
+    if (cached != null) return cached;
+    rethrow;
+  }
 });
 
 // ─── Chapter List ─────────────────────────────────────────────────────────────

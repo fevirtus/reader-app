@@ -7,7 +7,12 @@ import 'package:go_router/go_router.dart';
 
 import '../../../app/router/route_names.dart';
 import '../../../core/models/novel_model.dart';
+import '../../../core/theme/app_colors.dart';
+import '../../../core/theme/app_spacing.dart';
+import '../../../shared/widgets/empty_state.dart';
 import '../../../shared/widgets/main_app_header.dart';
+import '../../../shared/widgets/section_header.dart';
+import '../../../shared/widgets/skeleton_box.dart';
 import '../providers/home_provider.dart';
 
 class HomeScreen extends ConsumerWidget {
@@ -15,119 +20,74 @@ class HomeScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final homeAsync = ref.watch(homeProvider);
+    final data = ref.watch(homeDataProvider);
+    final sync = ref.watch(homeSyncProvider);
     final colorScheme = Theme.of(context).colorScheme;
+
+    Widget body;
+    if (data.isEmpty && sync.isLoading) {
+      body = ListView(
+        padding: const EdgeInsets.fromLTRB(0, AppSpacing.md, 0, AppSpacing.xl),
+        physics: const NeverScrollableScrollPhysics(),
+        children: [
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
+            child: SkeletonBox(height: 220, borderRadius: AppRadius.lg),
+          ),
+          const SizedBox(height: AppSpacing.xl),
+          const SkeletonNovelRow(),
+          const SizedBox(height: AppSpacing.xl),
+          const SkeletonNovelRow(),
+        ],
+      );
+    } else if (data.isEmpty && sync.hasError) {
+      body = EmptyState(
+        icon: Icons.cloud_off_rounded,
+        title: 'Không thể tải dữ liệu trang chủ',
+        subtitle: sync.error.toString(),
+        actionLabel: 'Tải lại',
+        onAction: () => ref.read(homeSyncProvider.notifier).refresh(),
+      );
+    } else {
+      body = RefreshIndicator(
+        onRefresh: () => ref.read(homeSyncProvider.notifier).refresh(),
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(0, AppSpacing.md, 0, AppSpacing.xl),
+          children: [
+            _HotCarousel(novels: data.hot),
+            const SizedBox(height: AppSpacing.md),
+            const _HomeQuickFilters(),
+            SectionHeader(
+              title: 'Truyện mới nhất',
+              onMore: () => context.go(RouteNames.search),
+            ),
+            _NovelHorizontalList(novels: data.latest),
+            SectionHeader(
+              title: 'Xếp hạng đánh giá',
+              onMore: () => context.go('${RouteNames.search}?sort=rating'),
+            ),
+            _FeatureGrid(novels: data.topRated.take(6).toList(), metricLabel: 'đánh giá'),
+            SectionHeader(
+              title: 'Xếp hạng lượt đọc',
+              onMore: () => context.go('${RouteNames.search}?sort=popular'),
+            ),
+            _FeatureGrid(novels: data.topViews.take(6).toList(), metricLabel: 'lượt đọc'),
+            const SizedBox(height: AppSpacing.md),
+          ],
+        ),
+      );
+    }
 
     return Scaffold(
       backgroundColor: colorScheme.surface,
       body: Column(
         children: [
           const MainAppHeader(),
-          Expanded(
-            child: homeAsync.when(
-              loading: () => const Center(child: CircularProgressIndicator()),
-              error: (e, _) => Center(
-                child: Padding(
-                  padding: const EdgeInsets.all(24),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Icon(Icons.cloud_off_rounded, size: 52),
-                      const SizedBox(height: 12),
-                      Text('Không thể tải dữ liệu trang chủ'),
-                      const SizedBox(height: 8),
-                      Text(
-                        e.toString(),
-                        maxLines: 3,
-                        overflow: TextOverflow.ellipsis,
-                        textAlign: TextAlign.center,
-                        style: Theme.of(context).textTheme.bodySmall,
-                      ),
-                      const SizedBox(height: 12),
-                      FilledButton(
-                        onPressed: () => ref.invalidate(homeProvider),
-                        child: const Text('Tải lại'),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-              data: (data) => RefreshIndicator(
-                onRefresh: () async => ref.invalidate(homeProvider),
-                child: ListView(
-                  padding: const EdgeInsets.fromLTRB(0, 12, 0, 24),
-                  children: [
-                    _HotCarousel(novels: data.hot),
-                    const SizedBox(height: 12),
-                    const _HomeQuickFilters(),
-                    _SectionHeader(
-                      title: 'Truyện mới nhất',
-                      onMore: () => context.go(RouteNames.search),
-                    ),
-                    _NovelHorizontalList(novels: data.latest),
-                    _SectionHeader(
-                      title: 'Xếp hạng đánh giá',
-                      onMore: () => context.go('${RouteNames.search}?sort=rating'),
-                    ),
-                    _FeatureGrid(novels: data.topRated.take(6).toList(), metricLabel: 'đánh giá'),
-                    _SectionHeader(
-                      title: 'Xếp hạng lượt đọc',
-                      onMore: () => context.go('${RouteNames.search}?sort=popular'),
-                    ),
-                    _FeatureGrid(novels: data.topViews.take(6).toList(), metricLabel: 'lượt đọc'),
-                    const SizedBox(height: 12),
-                  ],
-                ),
-              ),
-            ),
-          ),
+          Expanded(child: body),
         ],
       ),
     );
   }
-}
-
-class _SectionHeader extends StatelessWidget {
-  final String title;
-  final VoidCallback? onMore;
-
-  const _SectionHeader({required this.title, this.onMore});
-
-  @override
-  Widget build(BuildContext context) => Padding(
-        padding: const EdgeInsets.fromLTRB(18, 18, 12, 6),
-        child: Row(
-          children: [
-            Text(
-              title,
-              style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                    fontWeight: FontWeight.w500,
-                  ),
-            ),
-            const Spacer(),
-            if (onMore != null)
-              InkWell(
-                onTap: onMore,
-                borderRadius: BorderRadius.circular(999),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-                  child: Row(
-                    children: [
-                      Text(
-                        'Xem thêm',
-                        style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                              color: const Color(0xFF14B8A6),
-                            ),
-                      ),
-                      const SizedBox(width: 4),
-                      const Icon(Icons.chevron_right_rounded, color: Color(0xFF14B8A6)),
-                    ],
-                  ),
-                ),
-              ),
-          ],
-        ),
-      );
 }
 
 class _HomeQuickFilters extends StatelessWidget {
@@ -141,25 +101,24 @@ class _HomeQuickFilters extends StatelessWidget {
       (Icons.sell_rounded, 'Miễn phí'),
       (Icons.local_fire_department_rounded, 'Truyện hot'),
     ];
+    final accent = Theme.of(context).colorScheme.primary;
 
     return Padding(
-      padding: const EdgeInsets.fromLTRB(10, 0, 10, 8),
+      padding: const EdgeInsets.fromLTRB(AppSpacing.sm, 0, AppSpacing.sm, AppSpacing.sm),
       child: Row(
         children: items
             .map(
               (item) => Expanded(
                 child: Column(
                   children: [
-                    Icon(item.$1, color: const Color(0xFF14B8A6), size: 26),
-                    const SizedBox(height: 6),
+                    Icon(item.$1, color: accent, size: 26),
+                    const SizedBox(height: AppSpacing.xs),
                     Text(
                       item.$2,
                       textAlign: TextAlign.center,
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color: const Color(0xFF14B8A6),
-                          ),
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(color: accent),
                     ),
                   ],
                 ),
@@ -239,15 +198,16 @@ class _HotCarouselState extends State<_HotCarousel> {
   @override
   Widget build(BuildContext context) {
     if (widget.novels.isEmpty) return const SizedBox.shrink();
+    final accent = Theme.of(context).colorScheme.primary;
     return SizedBox(
       height: 260,
       child: Column(
         children: [
           Expanded(
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
+              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg, vertical: AppSpacing.sm),
               child: ClipRRect(
-                borderRadius: BorderRadius.circular(12),
+                borderRadius: BorderRadius.circular(AppRadius.lg),
                 child: ClipRect(
                   child: PageView.builder(
                     controller: _controller,
@@ -265,7 +225,7 @@ class _HotCarouselState extends State<_HotCarousel> {
               ),
             ),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: AppSpacing.sm),
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: List.generate(widget.novels.length.clamp(0, 5), (index) {
@@ -276,8 +236,8 @@ class _HotCarouselState extends State<_HotCarousel> {
                 width: active ? 16 : 7,
                 height: 7,
                 decoration: BoxDecoration(
-                  color: active ? const Color(0xFF14B8A6) : Colors.white54,
-                  borderRadius: BorderRadius.circular(99),
+                  color: active ? accent : Colors.white54,
+                  borderRadius: BorderRadius.circular(AppRadius.pill),
                 ),
               );
             }),
@@ -318,18 +278,18 @@ class _CarouselCard extends StatelessWidget {
           ),
         ),
         Positioned(
-          bottom: 12,
-          left: 12,
-          right: 12,
+          bottom: AppSpacing.md,
+          left: AppSpacing.md,
+          right: AppSpacing.md,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               if (novel.status.isNotEmpty)
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm, vertical: 4),
                   decoration: BoxDecoration(
-                    color: const Color(0xFF22C55E),
-                    borderRadius: BorderRadius.circular(999),
+                    color: AppColors.lightSuccess,
+                    borderRadius: BorderRadius.circular(AppRadius.pill),
                   ),
                   child: Text(
                     novel.status,
@@ -340,7 +300,7 @@ class _CarouselCard extends StatelessWidget {
                     ),
                   ),
                 ),
-              const SizedBox(height: 10),
+              const SizedBox(height: AppSpacing.sm),
               Text(
                 novel.title,
                 style: const TextStyle(
@@ -374,13 +334,14 @@ class _NovelHorizontalList extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
     return SizedBox(
       height: 226,
       child: ListView.separated(
-        padding: const EdgeInsets.symmetric(horizontal: 18),
+        padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
         scrollDirection: Axis.horizontal,
         itemCount: novels.length,
-        separatorBuilder: (_, separatorIndex) => const SizedBox(width: 12),
+        separatorBuilder: (_, separatorIndex) => const SizedBox(width: AppSpacing.md),
         itemBuilder: (context, index) {
           final novel = novels[index];
           return GestureDetector(
@@ -391,7 +352,7 @@ class _NovelHorizontalList extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   ClipRRect(
-                    borderRadius: BorderRadius.circular(10),
+                    borderRadius: BorderRadius.circular(AppRadius.md),
                     child: novel.coverUrl != null
                         ? CachedNetworkImage(
                             imageUrl: novel.coverUrl!,
@@ -402,11 +363,11 @@ class _NovelHorizontalList extends StatelessWidget {
                         : Container(
                             width: 122,
                             height: 155,
-                            color: Theme.of(context).colorScheme.primaryContainer,
+                            color: colorScheme.primaryContainer,
                             child: const Icon(Icons.menu_book),
                           ),
                   ),
-                  const SizedBox(height: 6),
+                  const SizedBox(height: AppSpacing.sm),
                   Flexible(
                     child: Text(
                       novel.title,
@@ -425,7 +386,7 @@ class _NovelHorizontalList extends StatelessWidget {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: const Color(0xFF58D68D),
+                          color: colorScheme.onSurfaceVariant,
                         ),
                   ),
                 ],
@@ -447,9 +408,10 @@ class _FeatureGrid extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (novels.isEmpty) return const SizedBox.shrink();
+    final colorScheme = Theme.of(context).colorScheme;
 
     return Padding(
-      padding: const EdgeInsets.fromLTRB(18, 4, 18, 0),
+      padding: const EdgeInsets.fromLTRB(AppSpacing.lg, AppSpacing.xs, AppSpacing.lg, 0),
       child: GridView.builder(
         shrinkWrap: true,
         physics: const NeverScrollableScrollPhysics(),
@@ -457,8 +419,8 @@ class _FeatureGrid extends StatelessWidget {
         itemCount: novels.length,
         gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
           crossAxisCount: 2,
-          mainAxisSpacing: 18,
-          crossAxisSpacing: 14,
+          mainAxisSpacing: AppSpacing.xl,
+          crossAxisSpacing: AppSpacing.md,
           childAspectRatio: 0.74,
         ),
         itemBuilder: (context, index) {
@@ -470,7 +432,7 @@ class _FeatureGrid extends StatelessWidget {
               children: [
                 Expanded(
                   child: ClipRRect(
-                    borderRadius: BorderRadius.circular(10),
+                    borderRadius: BorderRadius.circular(AppRadius.md),
                     child: novel.coverUrl != null
                         ? CachedNetworkImage(
                             imageUrl: novel.coverUrl!,
@@ -478,12 +440,12 @@ class _FeatureGrid extends StatelessWidget {
                             fit: BoxFit.cover,
                           )
                         : Container(
-                            color: Theme.of(context).colorScheme.primaryContainer,
+                            color: colorScheme.primaryContainer,
                             child: const Center(child: Icon(Icons.menu_book_rounded)),
                           ),
                   ),
                 ),
-                const SizedBox(height: 8),
+                const SizedBox(height: AppSpacing.sm),
                 Text(
                   novel.title,
                   maxLines: 1,
@@ -494,7 +456,7 @@ class _FeatureGrid extends StatelessWidget {
                 Text(
                   '${novel.totalChapters} Chương',
                   style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        color: const Color(0xFF58D68D),
+                        color: colorScheme.onSurfaceVariant,
                       ),
                 ),
                 Text(
@@ -502,7 +464,7 @@ class _FeatureGrid extends StatelessWidget {
                       ? '${novel.rating.toStringAsFixed(1)}/10'
                       : '${novel.views} lượt đọc',
                   style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        color: const Color(0xFF1677FF),
+                        color: colorScheme.onSurfaceVariant,
                       ),
                 ),
               ],
@@ -513,4 +475,3 @@ class _FeatureGrid extends StatelessWidget {
     );
   }
 }
-
