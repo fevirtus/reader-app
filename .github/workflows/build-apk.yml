@@ -171,7 +171,8 @@ jobs:
           fi
 
           FLUTTER_CMD=(
-            flutter build apk --release --no-pub
+            # Regenerate the release plugin registrant after pub get (which includes test plugins).
+            flutter build apk --release
             "--dart-define=BASE_URL=${BASE_URL_VALUE}"
           )
 
