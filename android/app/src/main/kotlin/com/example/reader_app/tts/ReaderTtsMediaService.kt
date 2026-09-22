@@ -7,6 +7,9 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.database.sqlite.SQLiteDatabase
+import java.io.File
+import java.util.concurrent.Future
 import android.content.pm.ServiceInfo
 import android.media.AudioAttributes
 import android.media.AudioFocusRequest
@@ -59,7 +62,7 @@ class ReaderTtsMediaService : Service(), TextToSpeech.OnInitListener {
 		private const val TAG = "ReaderTtsMediaService"
 		private const val HEALTH_CHECK_INTERVAL_MS = 1500L
 		private const val START_GRACE_PERIOD_MS = 5_000L
-		private const val MAX_SEGMENT_RETRIES_BEFORE_SKIP = 4
+		private const val MAX_SEGMENT_RETRIES = 4
 		private const val DEDUPE_START_WINDOW_MS = 600L
 
 		const val ACTION_INIT = "com.example.reader_app.tts.INIT"
@@ -186,7 +189,7 @@ class ReaderTtsMediaService : Service(), TextToSpeech.OnInitListener {
 	private var isRebuildingEngine = false
 	private var engineRebuildAttempt = 0
 	private var audioFocusRetryAttempt = 0
-	private var consecutivePlaybackRecoveryFailures = 0
+	private var engineRecoveryAttempts = 0
 	private var pendingEngineRebuild: Runnable? = null
 	private var pendingAudioFocusRetry: Runnable? = null
 	private var pendingIdleStop: Runnable? = null
@@ -202,6 +205,10 @@ class ReaderTtsMediaService : Service(), TextToSpeech.OnInitListener {
 	private var includeChapterTitleInPlayback = true
 	private var apiBaseUrl: String? = null
 	private var isPreparingNextChapter = false
+	private var awaitingNextChapter = false
+	private var playbackError: String? = null
+	private var chapterTask: Future<*>? = null
+	@Volatile private var chapterConnection: HttpURLConnection? = null
 	private var lastStartSignature: String? = null
 	private var lastStartRequestAtMs = 0L
 	private val networkExecutor = Executors.newSingleThreadExecutor()
@@ -220,7 +227,7 @@ class ReaderTtsMediaService : Service(), TextToSpeech.OnInitListener {
 					clearDuckingState(restartPlayback = false)
 					if (status == "playing") {
 						pausedByAudioFocus = true
-						handlePause()
+						handlePause(fromAudioFocus = true)
 					}
 				}
 				AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> handleDuckAudioFocusLoss()
@@ -321,7 +328,6 @@ class ReaderTtsMediaService : Service(), TextToSpeech.OnInitListener {
 						if (utteranceId != currentUtteranceId) return@post
 						lastStartedUtterance = utteranceId
 						currentUtteranceStarted = true
-						currentSegmentRetry = 0
 						status = "playing"
 						scheduleUtteranceWatchdog(utteranceId)
 						syncNotificationState()
@@ -334,6 +340,7 @@ class ReaderTtsMediaService : Service(), TextToSpeech.OnInitListener {
 					mainHandler.post {
 						if (!isActiveUtterance(utteranceId)) return@post
 						if (utteranceId != currentUtteranceId) return@post
+						engineRecoveryAttempts = 0
 						clearUtteranceRuntimeState()
 						handleUtteranceCompleted(parseUtteranceIndex(utteranceId))
 					}
@@ -369,11 +376,10 @@ class ReaderTtsMediaService : Service(), TextToSpeech.OnInitListener {
 		isTtsReady = initStatus == TextToSpeech.SUCCESS
 		if (isTtsReady) {
 			engineRebuildAttempt = 0
-			consecutivePlaybackRecoveryFailures = 0
 			currentSegmentRetry = 0  // reset retry counter after successful engine reconnect
 			refreshAvailableVoices()
 			applyVoiceAndSpeedSettings()
-			if ((pendingReplayAfterInit || status == "playing") && segments.isNotEmpty()) {
+			if ((pendingReplayAfterInit || status == "playing") && segments.isNotEmpty() && !awaitingNextChapter) {
 				pendingReplayAfterInit = false
 				speakCurrentSegment(forceRestart = true)
 			}
@@ -394,20 +400,17 @@ class ReaderTtsMediaService : Service(), TextToSpeech.OnInitListener {
 		val ttsInstance = tts ?: return
 		val vietnameseVoices = ttsInstance.voices
 			?.filter { voice -> voice.locale?.toLanguageTag()?.lowercase()?.startsWith("vi") == true }
+			?.sortedBy { it.isNetworkConnectionRequired }
 			?.mapNotNull { voice ->
 				val locale = voice.locale?.toLanguageTag() ?: return@mapNotNull null
 				mapOf("name" to voice.name, "locale" to locale)
 			}
 			.orEmpty()
 			.distinctBy { voice -> "${voice["name"]}:${voice["locale"]}" }
-			.sortedBy { voice -> voice["name"] }
 
 		availableVoices = vietnameseVoices
 		if (voiceName.isNullOrBlank()) {
-			val preferred = vietnameseVoices.firstOrNull { voice ->
-				val normalized = voice["name"]?.lowercase().orEmpty()
-				normalized.contains("female") || normalized.contains("natural")
-			} ?: vietnameseVoices.firstOrNull()
+			val preferred = vietnameseVoices.firstOrNull()
 			voiceName = preferred?.get("name")
 			language = preferred?.get("locale") ?: language
 		}
@@ -461,11 +464,16 @@ class ReaderTtsMediaService : Service(), TextToSpeech.OnInitListener {
 		lastStartSignature = signature
 		lastStartRequestAtMs = now
 
+		cancelChapterLoad()
+		engineRecoveryAttempts = 0
+		currentSegmentRetry = 0
+		awaitingNextChapter = false
+		playbackError = null
 		cancelIdleStop()
 		backgroundModeEnabled = request.backgroundModeEnabled
 		speed = request.speed
 		language = request.language
-		voiceName = request.voiceName
+		voiceName = request.voiceName ?: voiceName
 		contentKey = request.contentKey
 		title = request.title
 		nextChapterId = request.nextChapterId
@@ -495,11 +503,16 @@ class ReaderTtsMediaService : Service(), TextToSpeech.OnInitListener {
 		}
 
 		if (!isTtsReady) return
+		applyVoiceAndSpeedSettings()
 		speakCurrentSegment(forceRestart = true)
 	}
 
-	private fun handlePause() {
+	private fun handlePause(fromAudioFocus: Boolean = false) {
+		if (!fromAudioFocus) pausedByAudioFocus = false
+		clearScheduledRecoveries()
 		if (status != "playing") return
+		cancelChapterLoad()
+		clearScheduledRecoveries()
 		sessionGeneration += 1
 		clearUtteranceRuntimeState()
 		status = "paused"
@@ -513,20 +526,30 @@ class ReaderTtsMediaService : Service(), TextToSpeech.OnInitListener {
 
 	private fun handleResume() {
 		if (segments.isEmpty()) return
+		engineRecoveryAttempts = 0
+		currentSegmentRetry = 0
 		cancelIdleStop()
 		status = "playing"
+		playbackError = null
 		isPreparingNextChapter = false
 		sessionGeneration += 1
 		clearUtteranceRuntimeState()
 		pendingReplayAfterInit = false
 		syncPowerState()
 		publishSnapshot()
+		if (awaitingNextChapter) {
+			handleChapterCompleted()
+			return
+		}
 		if (!isTtsReady) return
 		speakCurrentSegment(forceRestart = true)
 	}
 
 	private fun handleStop(clearContentKey: Boolean, reason: String) {
 		Log.i(TAG, "handleStop reason=$reason clearContentKey=$clearContentKey")
+		cancelChapterLoad()
+		awaitingNextChapter = false
+		playbackError = null
 		sessionGeneration += 1
 		clearScheduledRecoveries()
 		cancelIdleStop()
@@ -553,6 +576,9 @@ class ReaderTtsMediaService : Service(), TextToSpeech.OnInitListener {
 
 	private fun handleSkip(direction: Int) {
 		if (segments.isEmpty()) return
+		cancelChapterLoad()
+		awaitingNextChapter = false
+		playbackError = null
 		val nextIndex = (currentIndex + direction).coerceIn(0, segments.lastIndex)
 		if (nextIndex == currentIndex && status == "idle") return
 		currentIndex = nextIndex
@@ -583,21 +609,18 @@ class ReaderTtsMediaService : Service(), TextToSpeech.OnInitListener {
 	}
 
 	private fun handlePlaybackFailure() {
-		consecutivePlaybackRecoveryFailures += 1
-		Log.e(
-			TAG,
-			"Playback failure at index=$currentIndex contentKey=$contentKey, recoveryAttempt=$consecutivePlaybackRecoveryFailures",
-		)
+		// Preserve the current sentence. Recovery must not silently skip text
+		// or restart an unavailable engine forever.
 		status = "paused"
-		pendingReplayAfterInit = true
-		if (consecutivePlaybackRecoveryFailures > 12) {
-			// Keep trying indefinitely but avoid a tight error loop.
-			consecutivePlaybackRecoveryFailures = 6
-		}
+		pendingReplayAfterInit = false
+		playbackError = "Giọng đọc gặp lỗi. Hãy kiểm tra giọng tiếng Việt rồi nhấn tiếp tục."
+		clearScheduledRecoveries()
+		clearUtteranceRuntimeState()
+		tts?.stop()
+		abandonAudioFocus()
 		syncPowerState()
 		syncNotificationState()
 		publishSnapshot()
-		scheduleEngineRebuild("playback_failure")
 	}
 
 	private fun speakCurrentSegment(forceRestart: Boolean) {
@@ -619,7 +642,6 @@ class ReaderTtsMediaService : Service(), TextToSpeech.OnInitListener {
 			return
 		}
 
-		applyVoiceAndSpeedSettings()
 		status = "playing"
 		// Reset retry counter when advancing to a new segment; keep it when retrying same segment.
 		if (!forceRestart) {
@@ -711,8 +733,8 @@ class ReaderTtsMediaService : Service(), TextToSpeech.OnInitListener {
 		}
 
 		clearUtteranceRuntimeState()
-		if (currentSegmentRetry >= MAX_SEGMENT_RETRIES_BEFORE_SKIP) {
-			skipCurrentSegmentAfterFailure(reason)
+		if (currentSegmentRetry >= MAX_SEGMENT_RETRIES) {
+			handlePlaybackFailure()
 			return
 		}
 
@@ -731,6 +753,11 @@ class ReaderTtsMediaService : Service(), TextToSpeech.OnInitListener {
 			Log.w(TAG, "Rebuild already in progress, skipping: $reason")
 			return
 		}
+		engineRecoveryAttempts += 1
+		if (engineRecoveryAttempts > 3) {
+			handlePlaybackFailure()
+			return
+		}
 		Log.w(TAG, "Rebuilding TextToSpeech engine for recovery: $reason")
 		isRebuildingEngine = true
 		pendingReplayAfterInit = true
@@ -745,29 +772,6 @@ class ReaderTtsMediaService : Service(), TextToSpeech.OnInitListener {
 		setupTextToSpeech()
 	}
 
-	private fun skipCurrentSegmentAfterFailure(reason: String) {
-		Log.e(
-			TAG,
-			"Skipping problematic segment after repeated recovery failures: reason=$reason index=$currentIndex total=${segments.size}",
-		)
-		clearUtteranceRuntimeState()
-		pendingReplayAfterInit = false
-
-		val nextIndex = currentIndex + 1
-		if (nextIndex >= segments.size) {
-			handlePlaybackFailure()
-			return
-		}
-
-		currentIndex = nextIndex
-		currentSegmentRetry = 0
-		publishSnapshot()
-		if (!isTtsReady) {
-			rebuildTtsEngineForRecovery("skip_after_failure")
-			return
-		}
-		speakCurrentSegment(forceRestart = false)
-	}
 
 	private fun runPlaybackHealthCheck() {
 		if (status != "playing") return
@@ -949,6 +953,7 @@ class ReaderTtsMediaService : Service(), TextToSpeech.OnInitListener {
 	private fun currentSegment(): ReaderTtsSegment? = segments.getOrNull(currentIndex)
 
 	private fun currentProgressLabel(): String {
+		playbackError?.let { return it }
 		if (isPreparingNextChapter) return "Đang tải chương tiếp theo"
 		if (segments.isEmpty()) return voiceName ?: language
 		return "Câu ${currentIndex + 1}/${segments.size}"
@@ -1157,6 +1162,7 @@ class ReaderTtsMediaService : Service(), TextToSpeech.OnInitListener {
 				"completedCount" to completedCount,
 				"backgroundModeEnabled" to backgroundModeEnabled,
 				"isPreparingNextChapter" to isPreparingNextChapter,
+				"errorMessage" to playbackError,
 				"language" to language,
 				"voiceName" to voiceName,
 				"availableVietnameseVoices" to availableVoices,
@@ -1248,11 +1254,13 @@ class ReaderTtsMediaService : Service(), TextToSpeech.OnInitListener {
 	private fun handleChapterCompleted() {
 		clearUtteranceRuntimeState()
 		val nextId = nextChapterId
-		if (nextId.isNullOrBlank() || apiBaseUrl.isNullOrBlank()) {
+		if (nextId.isNullOrBlank()) {
 			finishPlaybackAfterChapterCompletion()
 			return
 		}
 
+		awaitingNextChapter = true
+		playbackError = null
 		isPreparingNextChapter = true
 		syncNotificationState()
 		publishSnapshot()
@@ -1260,6 +1268,8 @@ class ReaderTtsMediaService : Service(), TextToSpeech.OnInitListener {
 	}
 
 	private fun finishPlaybackAfterChapterCompletion() {
+		awaitingNextChapter = false
+		isPreparingNextChapter = false
 		status = "idle"
 		currentIndex = 0
 		completedCount += 1
@@ -1273,45 +1283,71 @@ class ReaderTtsMediaService : Service(), TextToSpeech.OnInitListener {
 		scheduleIdleStop()
 	}
 
+	private fun cancelChapterLoad() {
+		chapterTask?.cancel(true)
+		chapterTask = null
+		chapterConnection?.disconnect()
+		chapterConnection = null
+	}
+
 	private fun fetchAndPlayNextChapter(chapterId: String, generation: Int) {
-		networkExecutor.execute {
-			val remoteChapter = fetchChapterWithRetries(chapterId)
+		cancelChapterLoad()
+		val baseUrl = apiBaseUrl
+		chapterTask = networkExecutor.submit {
+			val chapter = try {
+				loadLocalChapter(chapterId) ?: fetchChapter(chapterId, baseUrl)
+			} catch (error: Exception) {
+				Log.w(TAG, "next_chapter_unavailable chapterId=$chapterId", error)
+				null
+			}
 			mainHandler.post {
-				if (generation != sessionGeneration || status == "idle") return@post
-				if (remoteChapter == null) {
-					Log.e(TAG, "Failed to fetch next chapter chapterId=$chapterId")
-					isPreparingNextChapter = false
-					finishPlaybackAfterChapterCompletion()
+				if (generation != sessionGeneration || status != "playing") return@post
+				isPreparingNextChapter = false
+				if (chapter == null) {
+					// Keep the next-chapter intent. Play retries it instead of replaying
+					// the last sentence, silently stopping, or looping network retries.
+					status = "paused"
+					playbackError = "Chưa tải được chương tiếp theo. Kiểm tra mạng rồi nhấn tiếp tục."
+					abandonAudioFocus()
+					syncPowerState()
+					syncNotificationState()
+					publishSnapshot()
 					return@post
 				}
-				adoptRemoteChapter(remoteChapter)
+				adoptRemoteChapter(chapter)
 			}
 		}
 	}
 
-	private fun fetchChapterWithRetries(chapterId: String): ReaderRemoteChapter? {
-		repeat(3) { attempt ->
-			try {
-				return fetchChapter(chapterId)
-			} catch (error: Throwable) {
-				Log.w(TAG, "fetch_next_chapter_failed attempt=${attempt + 1} chapterId=$chapterId", error)
-				if (attempt < 2) {
-					Thread.sleep((750L * (attempt + 1)).coerceAtMost(2_500L))
-				}
+	private fun loadLocalChapter(chapterId: String): ReaderRemoteChapter? {
+		// Same SQLite file as Drift/path_provider; read-only and off the main thread.
+		val file = File(getDir("flutter", Context.MODE_PRIVATE), "reader_app.db")
+		if (!file.exists()) return null
+		return SQLiteDatabase.openDatabase(file.path, null, SQLiteDatabase.OPEN_READONLY).use { db ->
+			db.rawQuery(
+				"SELECT chapter_id, number, title, content, next_chapter_id FROM chapter_contents WHERE chapter_id = ? LIMIT 1",
+				arrayOf(chapterId),
+			).use { row ->
+				if (!row.moveToFirst()) return@use null
+				Log.i(TAG, "next_chapter_local chapterId=$chapterId")
+				ReaderRemoteChapter(row.getString(0), row.getInt(1), row.getString(2),
+					row.getString(3), if (row.isNull(4)) null else row.getString(4))
 			}
 		}
-		return null
 	}
 
-	private fun fetchChapter(chapterId: String): ReaderRemoteChapter {
-		val baseUrl = apiBaseUrl?.trimEnd('/') ?: error("Missing api base URL for TTS service")
+	private fun fetchChapter(chapterId: String, origin: String?): ReaderRemoteChapter {
+		if (Thread.currentThread().isInterrupted) throw InterruptedException()
+		val baseUrl = origin?.trimEnd('/') ?: error("Missing api base URL for TTS service")
 		val connection = (URL("$baseUrl/api/chapters/$chapterId").openConnection() as HttpURLConnection).apply {
 			requestMethod = "GET"
-			connectTimeout = 20_000
-			readTimeout = 20_000
+			connectTimeout = 5_000
+			readTimeout = 8_000
 			setRequestProperty("Accept", "application/json")
 		}
 
+		chapterConnection = connection
+		Log.i(TAG, "next_chapter_network chapterId=$chapterId")
 		try {
 			val statusCode = connection.responseCode
 			val responseBody = (if (statusCode in 200..299) {
@@ -1327,9 +1363,10 @@ class ReaderTtsMediaService : Service(), TextToSpeech.OnInitListener {
 			val json = JSONObject(responseBody)
 			val id = json.optString("id").takeIf { it.isNotBlank() }
 				?: error("Chapter payload missing id")
+			require(id == chapterId) { "Unexpected chapter id" }
 			val title = json.optString("title").takeIf { it.isNotBlank() }
 			val content = json.optString("content")
-			val nextId = json.optString("nextChapterId").takeIf { it.isNotBlank() }
+			val nextId = if (json.isNull("nextChapterId")) null else json.optString("nextChapterId").takeIf { it.isNotBlank() }
 			val number = if (json.isNull("number")) null else json.optInt("number")
 
 			return ReaderRemoteChapter(
@@ -1341,10 +1378,13 @@ class ReaderTtsMediaService : Service(), TextToSpeech.OnInitListener {
 			)
 		} finally {
 			connection.disconnect()
+			if (chapterConnection === connection) chapterConnection = null
 		}
 	}
 
 	private fun adoptRemoteChapter(remoteChapter: ReaderRemoteChapter) {
+		awaitingNextChapter = false
+		playbackError = null
 		val nextTitle = buildChapterTitle(remoteChapter.number, remoteChapter.title)
 		val nextSegments = buildSegments(
 			content = remoteChapter.content,
@@ -1421,6 +1461,8 @@ class ReaderTtsMediaService : Service(), TextToSpeech.OnInitListener {
 	}
 
 	override fun onDestroy() {
+		sessionGeneration += 1
+		cancelChapterLoad()
 		mainHandler.removeCallbacks(playbackHealthRunnable)
 		isRebuildingEngine = false
 		clearScheduledRecoveries()

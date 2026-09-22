@@ -51,6 +51,7 @@ class MainActivity : FlutterActivity() {
 						ReaderTtsMediaService.initialize(this, enabled)
 						result.success(ReaderTtsMediaBridge.snapshot())
 					}
+					"getApplicationId" -> result.success(packageName)
 					"getSnapshot" -> result.success(ReaderTtsMediaBridge.snapshot())
 					"startReading" -> {
 						val content = call.argument<String>("content") ?: ""
@@ -65,7 +66,7 @@ class MainActivity : FlutterActivity() {
 						val includeTitle = call.argument<Boolean>("includeTitle") ?: true
 						val apiBaseUrl = call.argument<String>("apiBaseUrl")
 						val startIndex = call.argument<Int>("startIndex") ?: 0
-						ReaderTtsMediaService.startReading(
+						val started = ReaderTtsMediaService.startReading(
 							this,
 							ReaderTtsStartRequest(
 								content = content,
@@ -82,7 +83,8 @@ class MainActivity : FlutterActivity() {
 								startIndex = startIndex,
 							),
 						)
-						result.success(null)
+						if (started) result.success(null)
+						else result.error("tts_start_failed", "Không khởi động được dịch vụ đọc", null)
 					}
 					"pause" -> {
 						ReaderTtsMediaService.pause(this)

@@ -11,7 +11,8 @@ enum TtsStatus { idle, playing, paused }
 
 const double kTtsBaseSpeechRate = 0.9;
 
-double ttsDisplayMultiplier(double speechRate) => speechRate / kTtsBaseSpeechRate;
+double ttsDisplayMultiplier(double speechRate) =>
+    speechRate / kTtsBaseSpeechRate;
 
 String formatTtsSpeedLabel(double speechRate) {
   final multiplier = ttsDisplayMultiplier(speechRate);
@@ -65,6 +66,8 @@ class TtsState {
   final int progressEnd;
   final String? contentKey;
   final int completedCount;
+  final bool isBuffering;
+  final String? errorMessage;
   final bool backgroundModeEnabled;
   final bool batteryOptimizationIgnored;
   final String? pendingAutoStartChapterId;
@@ -82,6 +85,8 @@ class TtsState {
     this.progressEnd = -1,
     this.contentKey,
     this.completedCount = 0,
+    this.isBuffering = false,
+    this.errorMessage,
     this.backgroundModeEnabled = true,
     this.batteryOptimizationIgnored = false,
     this.pendingAutoStartChapterId,
@@ -102,38 +107,44 @@ class TtsState {
     bool clearContentKey = false,
     bool clearVoiceName = false,
     int? completedCount,
+    bool? isBuffering,
+    String? errorMessage,
+    bool clearError = false,
     bool? backgroundModeEnabled,
     bool? batteryOptimizationIgnored,
     String? pendingAutoStartChapterId,
     bool clearPendingAutoStartChapterId = false,
-  }) =>
-      TtsState(
-        status: status ?? this.status,
-        paragraphIndex: paragraphIndex ?? this.paragraphIndex,
-        totalParagraphs: totalParagraphs ?? this.totalParagraphs,
-        activeParagraphIndex: activeParagraphIndex ?? this.activeParagraphIndex,
-        speed: speed ?? this.speed,
-        language: language ?? this.language,
-        voiceName: clearVoiceName ? null : (voiceName ?? this.voiceName),
-        availableVietnameseVoices:
-            availableVietnameseVoices ?? this.availableVietnameseVoices,
-        progressStart: progressStart ?? this.progressStart,
-        progressEnd: progressEnd ?? this.progressEnd,
-        contentKey: clearContentKey ? null : (contentKey ?? this.contentKey),
-        completedCount: completedCount ?? this.completedCount,
-        backgroundModeEnabled: backgroundModeEnabled ?? this.backgroundModeEnabled,
-        batteryOptimizationIgnored:
-            batteryOptimizationIgnored ?? this.batteryOptimizationIgnored,
-        pendingAutoStartChapterId: clearPendingAutoStartChapterId
-            ? null
-            : (pendingAutoStartChapterId ?? this.pendingAutoStartChapterId),
-      );
+  }) => TtsState(
+    status: status ?? this.status,
+    paragraphIndex: paragraphIndex ?? this.paragraphIndex,
+    totalParagraphs: totalParagraphs ?? this.totalParagraphs,
+    activeParagraphIndex: activeParagraphIndex ?? this.activeParagraphIndex,
+    speed: speed ?? this.speed,
+    language: language ?? this.language,
+    voiceName: clearVoiceName ? null : (voiceName ?? this.voiceName),
+    availableVietnameseVoices:
+        availableVietnameseVoices ?? this.availableVietnameseVoices,
+    progressStart: progressStart ?? this.progressStart,
+    progressEnd: progressEnd ?? this.progressEnd,
+    contentKey: clearContentKey ? null : (contentKey ?? this.contentKey),
+    completedCount: completedCount ?? this.completedCount,
+    isBuffering: isBuffering ?? this.isBuffering,
+    errorMessage: clearError ? null : (errorMessage ?? this.errorMessage),
+    backgroundModeEnabled: backgroundModeEnabled ?? this.backgroundModeEnabled,
+    batteryOptimizationIgnored:
+        batteryOptimizationIgnored ?? this.batteryOptimizationIgnored,
+    pendingAutoStartChapterId: clearPendingAutoStartChapterId
+        ? null
+        : (pendingAutoStartChapterId ?? this.pendingAutoStartChapterId),
+  );
 
   bool get isPlaying => status == TtsStatus.playing;
 }
 
 class TtsNotifier extends StateNotifier<TtsState> {
-  TtsNotifier() : super(const TtsState()) {
+  TtsNotifier({bool? useNativeAndroid})
+    : _nativeAndroid = useNativeAndroid ?? Platform.isAndroid,
+      super(const TtsState()) {
     _initFuture = _init();
   }
 
@@ -153,13 +164,15 @@ class TtsNotifier extends StateNotifier<TtsState> {
   Future<void>? _initFuture;
   StreamSubscription<dynamic>? _mediaEventsSub;
   int _playbackGeneration = 0;
+  int _commandGeneration = 0;
   bool _isInterruptingPlayback = false;
   int _pendingFallbackIndex = -1;
   bool _didStartCurrentFallbackUtterance = false;
   bool _hasPromptedNotificationSettings = false;
-  bool _androidFallbackReady = false;
+  bool _fallbackReady = false;
 
-  bool get _useNativeAndroidMediaService => Platform.isAndroid;
+  final bool _nativeAndroid;
+  bool get _useNativeAndroidMediaService => _nativeAndroid;
 
   Future<void> _init() async {
     if (_useNativeAndroidMediaService) {
@@ -246,15 +259,15 @@ class TtsNotifier extends StateNotifier<TtsState> {
 
     final snapshot = await _mediaChannel.invokeMethod<dynamic>('getSnapshot');
     _applyAndroidSnapshot(snapshot);
-
-    await _ensureAndroidMediaNotificationsEnabled();
   }
 
   Future<void> _ensureAndroidMediaNotificationsEnabled() async {
     if (!_useNativeAndroidMediaService) return;
     if (_hasPromptedNotificationSettings) return;
 
-    final enabled = await _mediaChannel.invokeMethod<bool>('areNotificationsEnabled') ?? true;
+    final enabled =
+        await _mediaChannel.invokeMethod<bool>('areNotificationsEnabled') ??
+        true;
     if (enabled) return;
 
     _hasPromptedNotificationSettings = true;
@@ -304,21 +317,16 @@ class TtsNotifier extends StateNotifier<TtsState> {
       if (vietnamese.isNotEmpty) {
         final preferred = vietnamese.firstWhere(
           (voice) =>
-              (voice['name']
-                      ?.toString()
-                      .toLowerCase()
-                      .contains('female') ??
+              (voice['name']?.toString().toLowerCase().contains('female') ??
                   false) ||
-              (voice['name']
-                      ?.toString()
-                      .toLowerCase()
-                      .contains('natural') ??
+              (voice['name']?.toString().toLowerCase().contains('natural') ??
                   false),
           orElse: () => vietnamese.first,
         );
         selectedName = preferred['name']?.toString();
         selectedLanguage =
-            (preferred['locale'] ?? preferred['language'] ?? 'vi-VN').toString();
+            (preferred['locale'] ?? preferred['language'] ?? 'vi-VN')
+                .toString();
       }
     }
 
@@ -334,8 +342,8 @@ class TtsNotifier extends StateNotifier<TtsState> {
     );
   }
 
-  Future<void> _ensureAndroidFallbackReady() async {
-    if (_androidFallbackReady) return;
+  Future<void> _ensureFallbackReady() async {
+    if (_fallbackReady) return;
 
     await _tts.awaitSpeakCompletion(true);
     await _tts.setSharedInstance(true);
@@ -377,7 +385,7 @@ class TtsNotifier extends StateNotifier<TtsState> {
       );
     });
 
-    _androidFallbackReady = true;
+    _fallbackReady = true;
   }
 
   Future<void> _startFallbackReading({
@@ -385,7 +393,7 @@ class TtsNotifier extends StateNotifier<TtsState> {
     required _TtsSegment selectedSegment,
     required String? contentKey,
   }) async {
-    await _ensureAndroidFallbackReady();
+    await _ensureFallbackReady();
     final sessionId = await _interruptFallbackPlayback();
 
     state = state.copyWith(
@@ -440,11 +448,17 @@ class TtsNotifier extends StateNotifier<TtsState> {
       status: status,
       paragraphIndex: (data['paragraphIndex'] as num?)?.toInt() ?? 0,
       totalParagraphs: (data['totalParagraphs'] as num?)?.toInt() ?? 0,
-      activeParagraphIndex: (data['activeParagraphIndex'] as num?)?.toInt() ?? -1,
+      activeParagraphIndex:
+          (data['activeParagraphIndex'] as num?)?.toInt() ?? -1,
       progressStart: (data['progressStart'] as num?)?.toInt() ?? -1,
       progressEnd: (data['progressEnd'] as num?)?.toInt() ?? -1,
       contentKey: data['contentKey']?.toString(),
-      completedCount: (data['completedCount'] as num?)?.toInt() ?? state.completedCount,
+      clearContentKey: data['contentKey'] == null,
+      isBuffering: data['isPreparingNextChapter'] == true,
+      errorMessage: data['errorMessage']?.toString(),
+      clearError: data['errorMessage'] == null,
+      completedCount:
+          (data['completedCount'] as num?)?.toInt() ?? state.completedCount,
       language: data['language']?.toString() ?? state.language,
       voiceName: data['voiceName']?.toString(),
       availableVietnameseVoices: voices,
@@ -477,14 +491,14 @@ class TtsNotifier extends StateNotifier<TtsState> {
     if (includeTitle && titleText != null && titleText.isNotEmpty) {
       final sanitizedTitle = _sanitizeForTts(titleText);
       if (sanitizedTitle.isNotEmpty) {
-      segments.add(
-        _TtsSegment(
-        text: sanitizedTitle,
-        paragraphIndex: -1,
-        start: -1,
-        end: -1,
-        ),
-      );
+        segments.add(
+          _TtsSegment(
+            text: sanitizedTitle,
+            paragraphIndex: -1,
+            start: -1,
+            end: -1,
+          ),
+        );
       }
     }
 
@@ -572,7 +586,9 @@ class TtsNotifier extends StateNotifier<TtsState> {
       return;
     }
 
-    final selected = state.availableVietnameseVoices.where((v) => v.name == voiceName);
+    final selected = state.availableVietnameseVoices.where(
+      (v) => v.name == voiceName,
+    );
     if (selected.isEmpty) return;
 
     final voice = selected.first;
@@ -612,7 +628,8 @@ class TtsNotifier extends StateNotifier<TtsState> {
   Future<void> ensureBatteryOptimizationIgnored() async {
     if (!Platform.isAndroid) return;
     try {
-      final isIgnored = await _backgroundChannel.invokeMethod<bool>(
+      final isIgnored =
+          await _backgroundChannel.invokeMethod<bool>(
             'isIgnoringBatteryOptimizations',
           ) ??
           false;
@@ -620,9 +637,12 @@ class TtsNotifier extends StateNotifier<TtsState> {
       state = state.copyWith(batteryOptimizationIgnored: isIgnored);
       if (isIgnored) return;
 
-      await _backgroundChannel.invokeMethod<void>('requestIgnoreBatteryOptimizations');
+      await _backgroundChannel.invokeMethod<void>(
+        'requestIgnoreBatteryOptimizations',
+      );
 
-      final afterRequest = await _backgroundChannel.invokeMethod<bool>(
+      final afterRequest =
+          await _backgroundChannel.invokeMethod<bool>(
             'isIgnoringBatteryOptimizations',
           ) ??
           false;
@@ -658,13 +678,18 @@ class TtsNotifier extends StateNotifier<TtsState> {
     String? apiBaseUrl,
     bool includeTitle = true,
   }) async {
+    final command = ++_commandGeneration;
     if (!_initialized) {
       await (_initFuture ?? _init());
     }
 
+    if (!mounted || command != _commandGeneration) return;
     // A direct start request (tap sentence/play button) should win over any
     // queued chapter auto-start from previous navigation/completion events.
-    state = state.copyWith(clearPendingAutoStartChapterId: true);
+    state = state.copyWith(
+      clearPendingAutoStartChapterId: true,
+      clearError: true,
+    );
 
     _segments = _buildSegments(
       content,
@@ -697,6 +722,7 @@ class TtsNotifier extends StateNotifier<TtsState> {
 
     if (_useNativeAndroidMediaService) {
       await _ensureAndroidMediaNotificationsEnabled();
+      if (!mounted || command != _commandGeneration) return;
 
       state = state.copyWith(
         status: TtsStatus.playing,
@@ -724,11 +750,13 @@ class TtsNotifier extends StateNotifier<TtsState> {
           'includeTitle': includeTitle,
         });
       } on PlatformException {
-        await _startFallbackReading(
-          validIndex: validIndex,
-          selectedSegment: selectedSegment,
-          contentKey: contentKey,
-        );
+        if (mounted && command == _commandGeneration) {
+          state = state.copyWith(
+            status: TtsStatus.idle,
+            errorMessage:
+                'Không khởi động được giọng đọc. Hãy nhấn phát để thử lại.',
+          );
+        }
       }
       return;
     }
@@ -758,7 +786,10 @@ class TtsNotifier extends StateNotifier<TtsState> {
     return _playbackGeneration;
   }
 
-  Future<void> _playFallbackFromGeneration(int startIndex, int generation) async {
+  Future<void> _playFallbackFromGeneration(
+    int startIndex,
+    int generation,
+  ) async {
     if (startIndex < 0 || startIndex >= _segments.length) {
       state = state.copyWith(
         status: TtsStatus.idle,
@@ -834,6 +865,7 @@ class TtsNotifier extends StateNotifier<TtsState> {
   }
 
   Future<void> pause() async {
+    ++_commandGeneration;
     if (_useNativeAndroidMediaService) {
       await _mediaChannel.invokeMethod<void>('pause');
       return;
@@ -877,6 +909,12 @@ class TtsNotifier extends StateNotifier<TtsState> {
   }
 
   Future<void> stop() async {
+    ++_commandGeneration;
+    state = state.copyWith(
+      clearPendingAutoStartChapterId: true,
+      clearError: true,
+      isBuffering: false,
+    );
     if (_useNativeAndroidMediaService) {
       await _mediaChannel.invokeMethod<void>('stop');
       state = state.copyWith(

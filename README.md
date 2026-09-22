@@ -163,3 +163,27 @@ Kiểm thử offline: `flutter test test/offline_sync_test.dart`.
   không phải điều kiện để mở sách; không lấy lại tủ sách mỗi lần vào chi tiết.
 - Truy vấn mục lục/cờ tải chỉ lấy metadata và ID, không đọc toàn bộ văn bản
   của các chương. Điều này tránh tải cả truyện vào RAM chỉ để hiện mục lục.
+
+### TTS trên Android
+
+- Android chỉ dùng foreground service native để phát. Flutter gửi lệnh và phản
+  ánh trạng thái; không khởi động thêm engine Flutter khi service gặp lỗi.
+- Chuyển chương tự động đọc cùng SQLite local trước, kể cả khi màn hình đang ở
+  nền. Chỉ chương chưa lưu mới gọi API, với timeout hữu hạn và không tự retry
+  liên tục. Khi lỗi, giữ ý định sang chương và chờ nút tiếp tục để thử lại.
+- Dừng, tạm dừng hoặc đổi chương hủy tác vụ tải đang chờ; phản hồi/callback cũ
+  không được tự phát lại. Tiếp tục sau lỗi mạng thử chương còn thiếu, không đọc
+  lại câu cuối chương cũ. Lỗi engine lặp lại sẽ tạm dừng thay vì bỏ qua văn bản.
+- Ưu tiên giọng tiếng Việt không cần mạng. Giọng cần mạng do người dùng chọn
+  vẫn phụ thuộc engine của thiết bị. Có thể bật hỗ trợ chạy nền/tối ưu pin trong
+  cài đặt đọc; app không ép cấp quyền bằng hộp thoại lặp khi khởi động.
+
+Kiểm thử thiết bị (cài song song `Reader TTS Test`, không thay bản Play Store):
+```sh
+python3 scripts/test_tts_device.py DEVICE_ID
+```
+Bản thử này không cấu hình Google Sign-In. Script tự đưa app ra nền và mở lại
+để kiểm tra phát nền. Flutter tự gỡ package kiểm thử khi kết thúc; luôn chạy qua
+script để dùng package test riêng và kiểm tra bản Play Store không bị thay đổi.
+Suite tạo/xóa chương mẫu riêng,
+không cần tắt Wi-Fi và không dùng tài khoản thật.

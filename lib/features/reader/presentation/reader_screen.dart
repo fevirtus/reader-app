@@ -271,6 +271,7 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
     if (!mounted) return;
 
     final tts = ref.read(ttsProvider);
+    if (tts.pendingAutoStartChapterId == widget.chapterId) return;
     final targetChapterId = tts.contentKey;
     if (targetChapterId == null || targetChapterId.isEmpty) return;
     if (targetChapterId == widget.chapterId) return;
@@ -507,7 +508,9 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
     final isActivelyPlaying = tts.contentKey == currentChapterId &&
         tts.status == TtsStatus.playing;
     if (!isActivelyPlaying) return;
-    ref.read(ttsProvider.notifier).scheduleAutoStartForChapter(targetChapterId);
+    final notifier = ref.read(ttsProvider.notifier);
+    unawaited(notifier.pause());
+    notifier.scheduleAutoStartForChapter(targetChapterId);
   }
 
   void _consumePendingAutoStartForChapter(ChapterModel chapter) {

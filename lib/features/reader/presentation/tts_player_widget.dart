@@ -39,7 +39,7 @@ class TtsPlayerWidget extends ConsumerWidget {
     const speeds = [0.45, 0.675, 0.9, 1.125, 1.35, 1.8];
 
     Future<void> start() async {
-      if (tts.status == TtsStatus.paused) {
+      if (tts.status == TtsStatus.paused && tts.contentKey == contentKey) {
         unawaited(notifier.resume());
         onStarted?.call();
         return;
@@ -50,7 +50,7 @@ class TtsPlayerWidget extends ConsumerWidget {
       unawaited(
         notifier.startReading(
           content,
-          paragraphIndex: tts.paragraphIndex,
+          paragraphIndex: tts.contentKey == contentKey ? tts.paragraphIndex : 0,
           startParagraphIndex: resolveStartParagraphIndex?.call(),
           contentKey: contentKey,
           title: title,
@@ -79,7 +79,10 @@ class TtsPlayerWidget extends ConsumerWidget {
           ),
         ),
         itemBuilder: (_) => speeds
-            .map((s) => PopupMenuItem(value: s, child: Text(formatTtsSpeedLabel(s))))
+            .map(
+              (s) =>
+                  PopupMenuItem(value: s, child: Text(formatTtsSpeedLabel(s))),
+            )
             .toList(),
       );
     }
@@ -120,7 +123,9 @@ class TtsPlayerWidget extends ConsumerWidget {
                     width: 34,
                     height: 34,
                     decoration: BoxDecoration(
-                      color: Theme.of(context).colorScheme.primary.withAlpha(180),
+                      color: Theme.of(
+                        context,
+                      ).colorScheme.primary.withAlpha(180),
                       borderRadius: BorderRadius.circular(999),
                     ),
                     child: Icon(
@@ -136,15 +141,20 @@ class TtsPlayerWidget extends ConsumerWidget {
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         Text(
-                          title?.trim().isNotEmpty == true ? title! : 'Đang phát TTS',
+                          title?.trim().isNotEmpty == true
+                              ? title!
+                              : 'Đang phát TTS',
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                                fontWeight: FontWeight.w700,
-                              ),
+                          style: Theme.of(context).textTheme.labelLarge
+                              ?.copyWith(fontWeight: FontWeight.w700),
                         ),
                         Text(
-                          tts.totalParagraphs > 0
+                          tts.errorMessage != null
+                              ? tts.errorMessage!
+                              : tts.isBuffering
+                              ? 'Đang chuẩn bị chương tiếp theo…'
+                              : tts.totalParagraphs > 0
                               ? 'Câu ${tts.paragraphIndex + 1}/${tts.totalParagraphs}'
                               : (tts.voiceName ?? tts.language),
                           maxLines: 1,
@@ -169,7 +179,9 @@ class TtsPlayerWidget extends ConsumerWidget {
                   IconButton(
                     visualDensity: VisualDensity.compact,
                     icon: const Icon(Icons.stop_rounded),
-                    onPressed: tts.status != TtsStatus.idle ? notifier.stop : null,
+                    onPressed: tts.status != TtsStatus.idle
+                        ? notifier.stop
+                        : null,
                   ),
                   speedButton(),
                 ],
@@ -179,8 +191,10 @@ class TtsPlayerWidget extends ConsumerWidget {
                 borderRadius: BorderRadius.circular(999),
                 child: LinearProgressIndicator(
                   minHeight: 4,
-                  value: progressValue,
-                  backgroundColor: Theme.of(context).colorScheme.surface.withAlpha(120),
+                  value: tts.isBuffering ? null : progressValue,
+                  backgroundColor: Theme.of(
+                    context,
+                  ).colorScheme.surface.withAlpha(120),
                 ),
               ),
             ],
@@ -206,7 +220,9 @@ class TtsPlayerWidget extends ConsumerWidget {
             children: [
               IconButton(
                 icon: const Icon(Icons.skip_previous),
-                onPressed: tts.status != TtsStatus.idle ? notifier.skipBack : null,
+                onPressed: tts.status != TtsStatus.idle
+                    ? notifier.skipBack
+                    : null,
               ),
               if (!tts.isPlaying)
                 IconButton.filled(
@@ -224,12 +240,16 @@ class TtsPlayerWidget extends ConsumerWidget {
               ),
               IconButton(
                 icon: const Icon(Icons.skip_next),
-                onPressed: tts.status != TtsStatus.idle ? notifier.skipForward : null,
+                onPressed: tts.status != TtsStatus.idle
+                    ? notifier.skipForward
+                    : null,
               ),
               speedButton(),
             ],
           ),
           const SizedBox(height: 6),
+          if (tts.isBuffering) const Text('Đang chuẩn bị chương tiếp theo…'),
+          if (tts.errorMessage != null) Text(tts.errorMessage!),
           Wrap(
             spacing: 12,
             runSpacing: 4,
