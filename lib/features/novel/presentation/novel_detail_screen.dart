@@ -52,21 +52,6 @@ class _NovelDetailScreenState extends ConsumerState<NovelDetailScreen> {
   final Map<String, int> _rangeFirstIndex = {};
 
   @override
-  void initState() {
-    super.initState();
-    Future.microtask(_refreshBookshelfIfAuthed);
-  }
-
-  // Bookmarks API yêu cầu đăng nhập — gọi khi chưa đăng nhập sẽ bị 401 và kích
-  // hoạt nhầm luồng "phiên hết hạn", đá người dùng chưa từng đăng nhập ra màn login.
-  void _refreshBookshelfIfAuthed() {
-    if (!mounted) return;
-    if (ref.read(isAuthenticatedProvider)) {
-      ref.read(bookshelfProvider.notifier).fetch();
-    }
-  }
-
-  @override
   void didUpdateWidget(covariant NovelDetailScreen oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.novelId != widget.novelId) {
@@ -75,7 +60,6 @@ class _NovelDetailScreenState extends ConsumerState<NovelDetailScreen> {
         _selectedRangeIndex = 0;
         _rangeFirstIndex.clear();
       });
-      Future.microtask(_refreshBookshelfIfAuthed);
     }
   }
 

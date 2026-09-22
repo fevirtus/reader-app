@@ -151,3 +151,15 @@ Các liên kết dưới đây giả định ba repo được checkout cạnh nh
   Phải triển khai API mới trước app; với API cũ, outbox vẫn được giữ để thử lại.
 
 Kiểm thử offline: `flutter test test/offline_sync_test.dart`.
+
+### Mở truyện không chờ mạng
+
+- Truyện đã tải: chi tiết, mục lục và nội dung chương đọc local trước,
+  không gọi API truyện hay kiểm tra kết nối trên đường mở sách (kể cả mở bằng slug).
+- Truyện chỉ có cache: chi tiết và mục lục hiển thị cache ngay, sau đó làm mới
+  ở nền; API lỗi vẫn giữ dữ liệu đang hiển thị. Chương đã lưu được mở ngay và
+  giữ ổn định trong phiên đọc; muốn thay nội dung bản tải dùng **Cập nhật**.
+- Chương chưa lưu mới cần API. Đồng bộ tủ sách/tiến độ vẫn hoạt động độc lập,
+  không phải điều kiện để mở sách; không lấy lại tủ sách mỗi lần vào chi tiết.
+- Truy vấn mục lục/cờ tải chỉ lấy metadata và ID, không đọc toàn bộ văn bản
+  của các chương. Điều này tránh tải cả truyện vào RAM chỉ để hiện mục lục.

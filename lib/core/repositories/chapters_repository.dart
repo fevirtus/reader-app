@@ -55,32 +55,36 @@ class ChaptersRepository {
     return row?.toModel();
   }
 
-  Future<bool> hasDownload(String novelId) async =>
-      (await (_db.select(_db.chapterContents)
-                ..where(
-                  (t) =>
-                      t.novelId.equals(novelId) & t.isDownloaded.equals(true),
-                )
-                ..limit(1))
-              .get())
-          .isNotEmpty;
+  Future<bool> hasDownload(String novelId) async {
+    final table = _db.chapterContents;
+    final query = _db.selectOnly(table)
+      ..addColumns([table.chapterId])
+      ..where(table.novelId.equals(novelId) & table.isDownloaded.equals(true))
+      ..limit(1);
+    return (await query.get()).isNotEmpty;
+  }
 
   Future<List<ChapterListItem>> cachedContentsList(String novelId) async {
-    final rows =
-        await (_db.select(_db.chapterContents)
-              ..where(
-                (t) => t.novelId.equals(novelId) & t.isDownloaded.equals(true),
-              )
-              ..orderBy([(t) => OrderingTerm.asc(t.number)]))
-            .get();
-    return rows
+    final table = _db.chapterContents;
+    // Never materialize chapter bodies just to render a table of contents.
+    final query = _db.selectOnly(table)
+      ..addColumns([
+        table.chapterId,
+        table.number,
+        table.title,
+        table.volumeTitle,
+        table.cachedAt,
+      ])
+      ..where(table.novelId.equals(novelId) & table.isDownloaded.equals(true))
+      ..orderBy([OrderingTerm.asc(table.number)]);
+    return (await query.get())
         .map(
-          (r) => ChapterListItem(
-            id: r.chapterId,
-            number: r.number,
-            title: r.title,
-            volumeTitle: r.volumeTitle,
-            createdAt: r.cachedAt,
+          (row) => ChapterListItem(
+            id: row.read(table.chapterId)!,
+            number: row.read(table.number)!,
+            title: row.read(table.title)!,
+            volumeTitle: row.read(table.volumeTitle),
+            createdAt: row.read(table.cachedAt)!,
           ),
         )
         .toList();
@@ -158,9 +162,13 @@ class ChaptersRepository {
   }
 
   Stream<Set<String>> watchDownloadedChapterIds(String novelId) {
-    final query = _db.select(_db.chapterContents)
-      ..where((t) => t.novelId.equals(novelId) & t.isDownloaded.equals(true));
-    return query.watch().map((rows) => rows.map((r) => r.chapterId).toSet());
+    final table = _db.chapterContents;
+    final query = _db.selectOnly(table)
+      ..addColumns([table.chapterId])
+      ..where(table.novelId.equals(novelId) & table.isDownloaded.equals(true));
+    return query.watch().map(
+      (rows) => rows.map((r) => r.read(table.chapterId)!).toSet(),
+    );
   }
 
   Future<void> deleteNovelChapters(String novelId) async {

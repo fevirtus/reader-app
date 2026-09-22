@@ -190,41 +190,59 @@ final novelsProvider =
 
 // ─── Novel Detail ─────────────────────────────────────────────────────────────
 
-final novelDetailProvider = FutureProvider.family<NovelModel, String>((
+final novelDetailProvider = StreamProvider.family<NovelModel, String>((
   ref,
   idOrSlug,
-) async {
+) async* {
   final repo = ref.read(novelsRepositoryProvider);
+  final chapters = ref.read(chaptersRepositoryProvider);
+  final client = ref.read(apiClientProvider);
+  final connectivity = ref.read(connectivityServiceProvider);
   final cached = await repo.getCachedNovel(idOrSlug);
-
-  final online = await ref.read(connectivityServiceProvider).checkIsOnline();
-  if (!online) {
-    if (cached != null) return cached;
-    throw Exception('Không có mạng và chưa có dữ liệu đã lưu cho truyện này');
+  if (cached != null) {
+    yield cached;
+    // A downloaded book opens without a connectivity check or metadata request.
+    if (await chapters.hasDownload(cached.id)) return;
   }
-
   try {
-    final client = ref.read(apiClientProvider);
+    if (!await connectivity.checkIsOnline()) {
+      if (cached != null) return;
+      throw Exception('Không có mạng và chưa có dữ liệu đã lưu cho truyện này');
+    }
     final res = await client.dio.get('/api/novels/$idOrSlug');
     final novel = NovelModel.fromJson(res.data as Map<String, dynamic>);
-    unawaited(repo.saveNovelDetail(novel));
-    return novel;
+    await repo.saveNovelDetail(novel);
+    final stored = await repo.getCachedNovel(novel.id);
+    yield stored?.updatedAt != null &&
+            novel.updatedAt != null &&
+            stored!.updatedAt!.isAfter(novel.updatedAt!)
+        ? stored
+        : novel;
   } catch (_) {
-    if (cached != null) return cached;
-    rethrow;
+    if (cached == null) rethrow;
+    // Background refresh failure must not replace usable local data with an error.
   }
 });
 
 // ─── Chapter List ─────────────────────────────────────────────────────────────
 
-final chapterListProvider = FutureProvider.family<List<ChapterListItem>, String>((
+final chapterListProvider = StreamProvider.family<List<ChapterListItem>, String>((
   ref,
   novelId,
-) async {
+) async* {
   final chaptersRepo = ref.read(chaptersRepositoryProvider);
-  final pinned = await chaptersRepo.cachedContentsList(novelId);
-  if (pinned.isNotEmpty) return pinned;
+  final novelsRepo = ref.read(novelsRepositoryProvider);
   final client = ref.read(apiClientProvider);
+  final connectivity = ref.read(connectivityServiceProvider);
+  final localNovel = await novelsRepo.getCachedNovel(novelId);
+  final canonicalId = localNovel?.id ?? novelId;
+  final pinned = await chaptersRepo.cachedContentsList(canonicalId);
+  if (pinned.isNotEmpty) {
+    yield pinned;
+    return;
+  }
+  final cached = await chaptersRepo.cachedMeta(canonicalId);
+  if (cached.isNotEmpty) yield cached;
 
   Future<List<ChapterListItem>> fetchAllChapters(String idOrSlug) async {
     const limit = 500;
@@ -255,26 +273,24 @@ final chapterListProvider = FutureProvider.family<List<ChapterListItem>, String>
   }
 
   try {
-    final chapters = await fetchAllChapters(novelId);
-    await chaptersRepo.saveMeta(novelId, chapters);
-    return chapters;
-  } catch (_) {
-    final cached = await chaptersRepo.cachedMeta(novelId);
-    if (cached.isNotEmpty) return cached;
-    // If route opened by slug/id mismatch, resolve canonical novel id and retry once.
-    // first request can return empty list. Resolve canonical id and retry once.
-    try {
-      final novelRes = await client.dio.get('/api/novels/$novelId');
-      final novelData = novelRes.data as Map<String, dynamic>;
-      final canonicalId = novelData['id'] as String?;
-      if (canonicalId != null &&
-          canonicalId.isNotEmpty &&
-          canonicalId != novelId) {
-        return await fetchAllChapters(canonicalId);
-      }
-    } catch (_) {
-      // Keep original empty list when fallback resolution fails.
+    if (!await connectivity.checkIsOnline()) {
+      if (cached.isNotEmpty) return;
+      throw Exception('Không có mạng và chưa lưu mục lục truyện này');
     }
-    rethrow;
+    var id = canonicalId;
+    // Resolve uncached slugs before paging; an empty response is not an error.
+    if (localNovel == null) {
+      final response = await client.dio.get('/api/novels/$novelId');
+      final novel = NovelModel.fromJson(
+        Map<String, dynamic>.from(response.data),
+      );
+      await novelsRepo.saveNovelDetail(novel);
+      id = novel.id;
+    }
+    final chapters = await fetchAllChapters(id);
+    await chaptersRepo.saveMeta(id, chapters);
+    yield chapters;
+  } catch (_) {
+    if (cached.isEmpty) rethrow;
   }
 });

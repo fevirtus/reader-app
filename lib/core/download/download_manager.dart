@@ -150,9 +150,15 @@ class DownloadManager {
           await store.remove(owner, key);
         }
       });
-      _ref.invalidate(chapterListProvider(id));
+      if (_ref.exists(novelDetailProvider(id))) {
+        _ref.invalidate(novelDetailProvider(id));
+      }
+      if (_ref.exists(chapterListProvider(id))) {
+        _ref.invalidate(chapterListProvider(id));
+      }
       for (final entry in meta) {
-        _ref.invalidate(chapterProvider(entry['id'] as String));
+        final provider = chapterProvider(entry['id'] as String);
+        if (_ref.exists(provider)) _ref.invalidate(provider);
       }
     } catch (e) {
       await downloads.upsert(
@@ -179,7 +185,9 @@ class DownloadManager {
         await store.remove('download:$id', key);
       }
     });
-    _ref.invalidate(chapterListProvider(id));
+    if (_ref.exists(chapterListProvider(id))) {
+      _ref.invalidate(chapterListProvider(id));
+    }
   }
 }
 

@@ -17,10 +17,12 @@ final chapterProvider = FutureProvider.family<ChapterModel, String>((
 ) async {
   final chaptersRepo = ref.read(chaptersRepositoryProvider);
 
-  final downloaded = await chaptersRepo.getDownloadedChapter(chapterId);
-  if (downloaded != null) return downloaded;
+  // Keep the current reading session stable and never wait for the network
+  // when this chapter is already available on the device.
+  final local = await chaptersRepo.getCachedChapter(chapterId);
+  if (local != null) return local;
 
-  // Try network first, fall back to cache/download đã lưu cục bộ
+  // Fetch only chapters which have never been saved locally.
   try {
     final client = ref.read(apiClientProvider);
     final res = await client.dio.get('/api/chapters/$chapterId');
@@ -121,7 +123,6 @@ class ReaderNotifier extends StateNotifier<ReadingProgress?> {
       }, occurredAt: occurredAt);
     }
   }
-
 }
 
 final readerProvider = StateNotifierProvider<ReaderNotifier, ReadingProgress?>((

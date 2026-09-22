@@ -1,3 +1,6 @@
+import 'package:reader_app/core/connectivity/connectivity_service.dart';
+import 'package:reader_app/features/novel/providers/novels_provider.dart';
+import 'package:reader_app/features/reader/providers/reader_provider.dart';
 import 'package:reader_app/core/models/novel_model.dart';
 import 'dart:io';
 import 'package:crypto/crypto.dart';
@@ -24,6 +27,17 @@ import 'package:reader_app/core/repositories/bookshelf_repository.dart';
 import 'package:reader_app/core/repositories/novels_repository.dart';
 import 'package:reader_app/core/sync/user_sync.dart';
 import 'package:reader_app/features/auth/providers/auth_provider.dart';
+
+class TestConnectivity extends ConnectivityService {
+  TestConnectivity(this.online);
+  final bool online;
+  int checks = 0;
+  @override
+  Future<bool> checkIsOnline() async {
+    checks++;
+    return online;
+  }
+}
 
 class MemorySecrets extends SecureStore {
   String? token = 'token-a';
@@ -91,6 +105,122 @@ void main() {
   tearDown(() async {
     await db.close();
   });
+
+  for (final online in [true, false]) {
+    test(
+      'downloaded detail, slug TOC and chapter make no API calls (online=$online)',
+      () async {
+        final novels = NovelsRepository(db);
+        await novels.saveNovelDetail(
+          NovelModel.fromJson({
+            'id': 'novel',
+            'slug': 'local-book',
+            'title': 'Saved book',
+          }),
+        );
+        await ChaptersRepository(
+          db,
+        ).saveDownloadedChapter(chapter('c1', 'saved text'));
+        final connectivity = TestConnectivity(online);
+        var requests = 0;
+        final api = ApiClient(
+          baseUrl: 'https://test.invalid',
+          secureStore: MemorySecrets(),
+        );
+        api.dio.httpClientAdapter = FakeHttp((r) async {
+          requests++;
+          throw StateError('Downloaded books must not request the API');
+        });
+        final container = ProviderContainer(
+          overrides: [
+            appDatabaseProvider.overrideWithValue(db),
+            apiClientProvider.overrideWithValue(api),
+            connectivityServiceProvider.overrideWithValue(connectivity),
+          ],
+        );
+        addTearDown(container.dispose);
+        expect(
+          (await container.read(
+            novelDetailProvider('local-book').future,
+          )).title,
+          'Saved book',
+        );
+        expect(
+          (await container.read(
+            chapterListProvider('local-book').future,
+          )).single.id,
+          'c1',
+        );
+        expect(
+          (await container.read(chapterProvider('c1').future)).content,
+          'saved text',
+        );
+        await Future<void>.delayed(const Duration(milliseconds: 30));
+        expect(requests, 0);
+        expect(connectivity.checks, 0);
+      },
+    );
+  }
+
+  test(
+    'cached detail and TOC display before stalled API; failure keeps cache',
+    () async {
+      await NovelsRepository(db).saveNovelDetail(
+        NovelModel.fromJson({
+          'id': 'novel',
+          'slug': 'local-book',
+          'title': 'Cached book',
+        }),
+      );
+      await ChaptersRepository(db).saveMeta('novel', [
+        ChapterListItem(
+          id: 'c1',
+          number: 1,
+          title: 'Chapter 1',
+          createdAt: DateTime.utc(2026),
+        ),
+      ]);
+      final gate = Completer<void>();
+      final api = ApiClient(
+        baseUrl: 'https://test.invalid',
+        secureStore: MemorySecrets(),
+      );
+      api.dio.httpClientAdapter = FakeHttp((r) async {
+        await gate.future;
+        throw DioException(
+          requestOptions: r,
+          type: DioExceptionType.connectionError,
+        );
+      });
+      final container = ProviderContainer(
+        overrides: [
+          appDatabaseProvider.overrideWithValue(db),
+          apiClientProvider.overrideWithValue(api),
+          connectivityServiceProvider.overrideWithValue(TestConnectivity(true)),
+        ],
+      );
+      addTearDown(container.dispose);
+      expect(
+        (await container
+                .read(novelDetailProvider('novel').future)
+                .timeout(const Duration(seconds: 2)))
+            .title,
+        'Cached book',
+      );
+      expect(
+        (await container
+                .read(chapterListProvider('novel').future)
+                .timeout(const Duration(seconds: 2)))
+            .single
+            .id,
+        'c1',
+      );
+      gate.complete();
+      await Future<void>.delayed(const Duration(milliseconds: 30));
+      expect(container.read(novelDetailProvider('novel')).hasError, false);
+      expect(container.read(chapterListProvider('novel')).hasError, false);
+    },
+  );
 
   test(
     'downloaded chapter cannot be silently overwritten by network cache',
@@ -220,7 +350,9 @@ void main() {
       baseUrl: 'https://test.invalid',
       secureStore: secrets,
     );
-    api.dio.httpClientAdapter = FakeHttp((r) async => jsonResponse(['invalid']));
+    api.dio.httpClientAdapter = FakeHttp(
+      (r) async => jsonResponse(['invalid']),
+    );
     final container = ProviderContainer(
       overrides: [
         secureStoreProvider.overrideWithValue(secrets),
@@ -448,38 +580,61 @@ void main() {
       container.dispose();
     },
   );
-  test('schema v1 upgrade preserves downloaded text and legacy records', () async {
-    final dir = await Directory.systemTemp.createTemp('reader-migration-');
-    final file = File('${dir.path}/reader.db');
-    var legacy = AppDatabase(NativeDatabase(file));
-    await ChaptersRepository(legacy).saveDownloadedChapter(chapter('kept', 'offline text'));
-    await legacy.customStatement("INSERT INTO bookmarks (id, novel_id, type, shelf_status) VALUES ('legacy', 'novel', 'reading', 'reading')");
-    await legacy.customStatement('DROP TABLE offline_store');
-    await legacy.customStatement('PRAGMA user_version = 1');
-    await legacy.close();
-    final upgraded = AppDatabase(NativeDatabase(file));
-    try {
-      expect((await ChaptersRepository(upgraded).getDownloadedChapter('kept'))!.content, 'offline text');
-      expect((await upgraded.select(upgraded.bookmarks).get()).length, 1);
-      final upgradedStore = OfflineStore(upgraded);
-      await upgradedStore.write('A', 'outbox:pending', {'kind': 'progress'});
-      expect(await upgradedStore.read('A', 'outbox:pending'), {'kind': 'progress'});
-      final isolated = BookshelfRepository(upgradedStore, 'B', NovelsRepository(upgraded));
-      expect(await isolated.loadCached(), isEmpty);
-    } finally {
-      await upgraded.close();
-      await dir.delete(recursive: true);
-    }
-  });
+  test(
+    'schema v1 upgrade preserves downloaded text and legacy records',
+    () async {
+      final dir = await Directory.systemTemp.createTemp('reader-migration-');
+      final file = File('${dir.path}/reader.db');
+      var legacy = AppDatabase(NativeDatabase(file));
+      await ChaptersRepository(
+        legacy,
+      ).saveDownloadedChapter(chapter('kept', 'offline text'));
+      await legacy.customStatement(
+        "INSERT INTO bookmarks (id, novel_id, type, shelf_status) VALUES ('legacy', 'novel', 'reading', 'reading')",
+      );
+      await legacy.customStatement('DROP TABLE offline_store');
+      await legacy.customStatement('PRAGMA user_version = 1');
+      await legacy.close();
+      final upgraded = AppDatabase(NativeDatabase(file));
+      try {
+        expect(
+          (await ChaptersRepository(
+            upgraded,
+          ).getDownloadedChapter('kept'))!.content,
+          'offline text',
+        );
+        expect((await upgraded.select(upgraded.bookmarks).get()).length, 1);
+        final upgradedStore = OfflineStore(upgraded);
+        await upgradedStore.write('A', 'outbox:pending', {'kind': 'progress'});
+        expect(await upgradedStore.read('A', 'outbox:pending'), {
+          'kind': 'progress',
+        });
+        final isolated = BookshelfRepository(
+          upgradedStore,
+          'B',
+          NovelsRepository(upgraded),
+        );
+        expect(await isolated.loadCached(), isEmpty);
+      } finally {
+        await upgraded.close();
+        await dir.delete(recursive: true);
+      }
+    },
+  );
 
   test('older novel response cannot overwrite newer metadata', () async {
     final repo = NovelsRepository(db);
     Map<String, dynamic> data(String title, String time) => {
-      'id': 'novel', 'title': title, 'updatedAt': time,
+      'id': 'novel',
+      'title': title,
+      'updatedAt': time,
     };
-    await repo.saveNovelDetail(NovelModel.fromJson(data('new', '2026-02-01T00:00:00Z')));
-    await repo.saveNovelDetail(NovelModel.fromJson(data('old', '2026-01-01T00:00:00Z')));
+    await repo.saveNovelDetail(
+      NovelModel.fromJson(data('new', '2026-02-01T00:00:00Z')),
+    );
+    await repo.saveNovelDetail(
+      NovelModel.fromJson(data('old', '2026-01-01T00:00:00Z')),
+    );
     expect((await repo.getCachedNovel('novel'))!.title, 'new');
   });
-
 }
