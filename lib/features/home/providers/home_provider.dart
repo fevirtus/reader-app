@@ -20,7 +20,8 @@ class HomeData {
     required this.topViews,
   });
 
-  bool get isEmpty => hot.isEmpty && latest.isEmpty && topRated.isEmpty && topViews.isEmpty;
+  bool get isEmpty =>
+      hot.isEmpty && latest.isEmpty && topRated.isEmpty && topViews.isEmpty;
 }
 
 // ─── Đọc từ DB cục bộ (offline-first) ─────────────────────────────────────────
@@ -59,17 +60,30 @@ class HomeSyncNotifier extends StateNotifier<AsyncValue<void>> {
 
   final Ref _ref;
   bool _hasSyncedOnce = false;
+  Future<void>? _inFlight;
 
-  Future<void> refresh() async {
+  Future<void> refresh() =>
+      _inFlight ??= _refresh().whenComplete(() => _inFlight = null);
+
+  Future<void> _refresh() async {
     state = const AsyncValue.loading();
     try {
       final client = _ref.read(apiClientProvider);
       final repo = _ref.read(novelsRepositoryProvider);
 
       final results = await Future.wait<Response<dynamic>>([
-        client.dio.get('/api/novels/browse', queryParameters: {'sort': 'popular', 'limit': '10', 'page': '1'}),
-        client.dio.get('/api/novels/browse', queryParameters: {'sort': 'latest', 'limit': '20', 'page': '1'}),
-        client.dio.get('/api/novels/browse', queryParameters: {'sort': 'rating', 'limit': '10', 'page': '1'}),
+        client.dio.get(
+          '/api/novels/browse',
+          queryParameters: {'sort': 'popular', 'limit': '10', 'page': '1'},
+        ),
+        client.dio.get(
+          '/api/novels/browse',
+          queryParameters: {'sort': 'latest', 'limit': '20', 'page': '1'},
+        ),
+        client.dio.get(
+          '/api/novels/browse',
+          queryParameters: {'sort': 'rating', 'limit': '10', 'page': '1'},
+        ),
       ]);
 
       final hot = _parseItems(results[0], 'popular');
@@ -82,9 +96,9 @@ class HomeSyncNotifier extends StateNotifier<AsyncValue<void>> {
       await repo.saveHomeFeed('topViews', hot.take(10).toList());
 
       _hasSyncedOnce = true;
-      state = const AsyncValue.data(null);
+      if (mounted) state = const AsyncValue.data(null);
     } catch (e, st) {
-      state = AsyncValue.error(e, st);
+      if (mounted) state = AsyncValue.error(e, st);
     }
   }
 
@@ -93,13 +107,15 @@ class HomeSyncNotifier extends StateNotifier<AsyncValue<void>> {
   Future<void> ensureSyncedIfOnline() async {
     if (_hasSyncedOnce) return;
     final online = await _ref.read(connectivityServiceProvider).checkIsOnline();
-    if (online) await refresh();
+    if (online && mounted && !_hasSyncedOnce) await refresh();
   }
 
   List<NovelModel> _parseItems(Response<dynamic> res, String feedName) {
     final raw = res.data;
     if (raw is! Map<String, dynamic>) {
-      throw FormatException('Feed $feedName response is not a JSON object: ${raw.runtimeType}');
+      throw FormatException(
+        'Feed $feedName response is not a JSON object: ${raw.runtimeType}',
+      );
     }
 
     final rawItems = raw['items'];
@@ -111,7 +127,9 @@ class HomeSyncNotifier extends StateNotifier<AsyncValue<void>> {
     for (var i = 0; i < rawItems.length; i++) {
       final item = rawItems[i];
       if (item is! Map<String, dynamic>) {
-        debugPrint('[HOME][SKIP] $feedName item#$i has invalid type: ${item.runtimeType}');
+        debugPrint(
+          '[HOME][SKIP] $feedName item#$i has invalid type: ${item.runtimeType}',
+        );
         continue;
       }
 
@@ -123,13 +141,16 @@ class HomeSyncNotifier extends StateNotifier<AsyncValue<void>> {
       }
     }
 
-    debugPrint('[HOME] $feedName parsed ${parsed.length}/${rawItems.length} items');
+    debugPrint(
+      '[HOME] $feedName parsed ${parsed.length}/${rawItems.length} items',
+    );
     return parsed;
   }
 }
 
-final homeSyncProvider = StateNotifierProvider<HomeSyncNotifier, AsyncValue<void>>((ref) {
-  final notifier = HomeSyncNotifier(ref);
-  unawaited(notifier.ensureSyncedIfOnline());
-  return notifier;
-});
+final homeSyncProvider =
+    StateNotifierProvider<HomeSyncNotifier, AsyncValue<void>>((ref) {
+      final notifier = HomeSyncNotifier(ref);
+      unawaited(notifier.ensureSyncedIfOnline());
+      return notifier;
+    });

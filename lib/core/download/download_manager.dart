@@ -45,6 +45,8 @@ class DownloadManager {
     int done = 0;
     int total = 0;
     try {
+      await downloads.ready;
+      if (_cancelled.contains(id)) return;
       final manifest = await _manifest(id);
       final meta = List<Map<String, dynamic>>.from(
         (manifest['chapters'] as List).map((e) => Map<String, dynamic>.from(e)),

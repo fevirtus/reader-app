@@ -18,7 +18,18 @@ class DownloadsTab extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final downloadsAsync = ref.watch(downloadsListProvider);
-    final downloads = downloadsAsync.valueOrNull ?? const [];
+    if (!downloadsAsync.hasValue) {
+      if (downloadsAsync.hasError) {
+        return EmptyState(
+          icon: Icons.error_outline_rounded,
+          title: 'Chưa đọc được danh sách tải xuống',
+          actionLabel: 'Thử lại',
+          onAction: () => ref.invalidate(downloadsListProvider),
+        );
+      }
+      return const Center(child: CircularProgressIndicator());
+    }
+    final downloads = downloadsAsync.value!;
 
     if (downloads.isEmpty) {
       return const EmptyState(
@@ -56,7 +67,8 @@ class _DownloadTile extends ConsumerWidget {
     final actions = ref.read(downloadActionsProvider);
     final colorScheme = Theme.of(context).colorScheme;
 
-    return GestureDetector(
+    return InkWell(
+      borderRadius: BorderRadius.circular(18),
       onTap: () => context.push(RouteNames.novelDetail(download.novelId)),
       child: Container(
         padding: const EdgeInsets.all(12),
@@ -91,32 +103,21 @@ class _DownloadTile extends ConsumerWidget {
                       borderRadius: BorderRadius.circular(4),
                       child: LinearProgressIndicator(
                         value:
-                            download.downloadedChapters /
-                            download.totalChapters,
+                            (download.downloadedChapters /
+                                    download.totalChapters)
+                                .clamp(0.0, 1.0),
                         minHeight: 6,
                       ),
                     ),
                   ],
                   const SizedBox(height: 10),
-                  Row(
+                  Wrap(
+                    spacing: 4,
+                    runSpacing: 4,
+                    crossAxisAlignment: WrapCrossAlignment.center,
                     children: [
-                      if (download.status != 'downloading')
-                        TextButton.icon(
-                          onPressed: () => actions.start(download.novelId),
-                          icon: const Icon(Icons.sync_rounded, size: 18),
-                          label: const Text('Cập nhật'),
-                        ),
-                      if (download.status == 'downloading')
-                        TextButton.icon(
-                          onPressed: () => actions.cancel(download.novelId),
-                          icon: const Icon(
-                            Icons.pause_circle_outline,
-                            size: 18,
-                          ),
-                          label: const Text('Tạm dừng'),
-                        )
-                      else if (download.status == 'done')
-                        TextButton.icon(
+                      if (download.status == 'done' || download.bytesSize > 0)
+                        FilledButton.tonalIcon(
                           onPressed: () => context.push(
                             RouteNames.novelDetail(download.novelId),
                           ),
@@ -125,22 +126,66 @@ class _DownloadTile extends ConsumerWidget {
                             size: 18,
                           ),
                           label: const Text('Mở truyện'),
+                        ),
+                      if (download.status == 'downloading')
+                        TextButton.icon(
+                          onPressed: () => actions.cancel(download.novelId),
+                          icon: const Icon(Icons.pause_rounded, size: 18),
+                          label: const Text('Tạm dừng'),
                         )
-                      else if (download.status == 'failed' ||
-                          download.status == 'paused')
+                      else if (download.status != 'done')
                         TextButton.icon(
                           onPressed: () => actions.start(download.novelId),
-                          icon: const Icon(Icons.refresh_rounded, size: 18),
-                          label: const Text('Tải lại'),
+                          icon: const Icon(Icons.download_rounded, size: 18),
+                          label: Text(
+                            download.status == 'paused'
+                                ? 'Tiếp tục tải'
+                                : 'Thử lại',
+                          ),
                         ),
-                      const Spacer(),
-                      IconButton(
-                        onPressed: () => actions.delete(download.novelId),
-                        icon: const Icon(
-                          Icons.delete_outline_rounded,
-                          size: 20,
-                        ),
-                        tooltip: 'Xoá bản tải',
+                      PopupMenuButton<String>(
+                        tooltip: 'Tuỳ chọn bản tải',
+                        icon: const Icon(Icons.more_horiz_rounded),
+                        itemBuilder: (_) => [
+                          if (download.status != 'downloading')
+                            const PopupMenuItem(
+                              value: 'update',
+                              child: Text('Cập nhật bản tải'),
+                            ),
+                          const PopupMenuItem(
+                            value: 'delete',
+                            child: Text('Xoá bản tải'),
+                          ),
+                        ],
+                        onSelected: (value) async {
+                          if (value == 'update') {
+                            await actions.start(download.novelId);
+                            return;
+                          }
+                          final confirmed = await showDialog<bool>(
+                            context: context,
+                            builder: (context) => AlertDialog(
+                              title: const Text('Xoá bản tải xuống?'),
+                              content: const Text(
+                                'Bạn sẽ cần tải lại để đọc ngoại tuyến. Tiến độ đọc và truyện trong tủ sách vẫn được giữ.',
+                              ),
+                              actions: [
+                                TextButton(
+                                  onPressed: () =>
+                                      Navigator.pop(context, false),
+                                  child: const Text('Giữ lại'),
+                                ),
+                                TextButton(
+                                  onPressed: () => Navigator.pop(context, true),
+                                  child: const Text('Xoá bản tải'),
+                                ),
+                              ],
+                            ),
+                          );
+                          if (confirmed == true) {
+                            await actions.delete(download.novelId);
+                          }
+                        },
                       ),
                     ],
                   ),
@@ -182,7 +227,9 @@ class _StatusLine extends StatelessWidget {
         );
       case 'failed':
         return Text(
-          download.errorMessage ?? 'Tải lỗi',
+          download.bytesSize > 0
+              ? 'Chưa cập nhật được. Bản đã tải vẫn đọc được.'
+              : 'Tải chưa hoàn tất. Kiểm tra kết nối rồi thử lại.',
           maxLines: 2,
           overflow: TextOverflow.ellipsis,
           style: style?.copyWith(color: Theme.of(context).colorScheme.error),

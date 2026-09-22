@@ -42,6 +42,10 @@ class BookCover extends StatelessWidget {
             : CachedNetworkImage(
                 imageUrl: url!,
                 fit: BoxFit.cover,
+                memCacheWidth: (width * MediaQuery.devicePixelRatioOf(context))
+                    .ceil()
+                    .clamp(1, 1024),
+                fadeInDuration: const Duration(milliseconds: 150),
                 placeholder: (_, _) => fallback,
                 errorWidget: (_, _, _) => fallback,
               ),

@@ -23,7 +23,15 @@ class ApiClient {
           debugPrint(
             '[API] ${options.method} ${options.baseUrl}${options.path}',
           );
-          final token = await _secureStore.getAccessToken();
+          String? token;
+          try {
+            token = await _secureStore.getAccessToken();
+          } catch (e, st) {
+            handler.reject(
+              DioException(requestOptions: options, error: e, stackTrace: st),
+            );
+            return;
+          }
           if (!options.headers.containsKey('Authorization') &&
               token != null &&
               token.isNotEmpty) {
@@ -43,7 +51,14 @@ class ApiClient {
           final statusCode = error.response?.statusCode;
           final path = error.requestOptions.path;
 
-          final currentToken = await _secureStore.getAccessToken();
+          String? currentToken;
+          try {
+            if (statusCode == 401) {
+              currentToken = await _secureStore.getAccessToken();
+            }
+          } catch (_) {
+            // Preserve the request error even when secure storage is unavailable.
+          }
           if (statusCode == 401 &&
               !_isAuthEndpoint(path) &&
               currentToken != null &&

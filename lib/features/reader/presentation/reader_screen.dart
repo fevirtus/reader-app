@@ -62,13 +62,22 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
   String? _autoStartQueuedChapterId;
   final List<GlobalKey> _paragraphKeys = [];
   String? _sentenceSlicesChapterId;
+  String? _sentenceSlicesContent;
+  String? _paragraphContent;
+  List<String> _cachedParagraphs = const [];
   List<List<_SentenceSlice>> _sentenceSlicesByParagraph = const [];
 
-  List<String> _paragraphsOf(String content) => content
-      .split(RegExp(r'\n+'))
-      .map((item) => item.trim())
-      .where((item) => item.isNotEmpty)
-      .toList();
+  List<String> _paragraphsOf(String content) {
+    if (_paragraphContent != content) {
+      _paragraphContent = content;
+      _cachedParagraphs = content
+          .split(RegExp(r'\n+'))
+          .map((item) => item.trim())
+          .where((item) => item.isNotEmpty)
+          .toList();
+    }
+    return _cachedParagraphs;
+  }
 
   String _chapterTopBarTitle(ChapterModel chapter) {
     final title = chapter.title.trim();
@@ -111,7 +120,8 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
       final start = slice.start;
       final end = slice.end;
 
-      final isCurrentSpoken = isActiveParagraph &&
+      final isCurrentSpoken =
+          isActiveParagraph &&
           highlightStart >= 0 &&
           highlightEnd > highlightStart &&
           start >= highlightStart &&
@@ -166,6 +176,7 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
     List<String> paragraphs,
   ) {
     if (_sentenceSlicesChapterId == chapter.id &&
+        _sentenceSlicesContent == chapter.content &&
         _sentenceSlicesByParagraph.length == paragraphs.length) {
       return _sentenceSlicesByParagraph;
     }
@@ -196,6 +207,7 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
     }
 
     _sentenceSlicesChapterId = chapter.id;
+    _sentenceSlicesContent = chapter.content;
     _sentenceSlicesByParagraph = parsed;
     return parsed;
   }
@@ -217,6 +229,7 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
     _lastAutoScrolledParagraph = index;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
+      if (index >= _paragraphKeys.length) return;
       final ctx = _paragraphKeys[index].currentContext;
       if (ctx == null) return;
       // Clear any active text-selection focus before programmatic scrolling.
@@ -275,7 +288,9 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
     final targetChapterId = tts.contentKey;
     if (targetChapterId == null || targetChapterId.isEmpty) return;
     if (targetChapterId == widget.chapterId) return;
-    if (tts.status != TtsStatus.playing && tts.status != TtsStatus.paused) return;
+    if (tts.status != TtsStatus.playing && tts.status != TtsStatus.paused) {
+      return;
+    }
 
     context.pushReplacement(RouteNames.readerChapter(targetChapterId));
   }
@@ -338,7 +353,9 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
         final nextChapterId = chapter.nextChapterId!;
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (!mounted) return;
-          ref.read(ttsProvider.notifier).scheduleAutoStartForChapter(nextChapterId);
+          ref
+              .read(ttsProvider.notifier)
+              .scheduleAutoStartForChapter(nextChapterId);
           context.pushReplacement(RouteNames.readerChapter(nextChapterId));
         });
       }
@@ -396,7 +413,9 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
       ref.read(readerProvider.notifier).updateScroll(offset);
     }
 
-    final currentOffset = _scrollCtrl.hasClients ? _scrollCtrl.offset : _lastScrollOffset;
+    final currentOffset = _scrollCtrl.hasClients
+        ? _scrollCtrl.offset
+        : _lastScrollOffset;
     final delta = currentOffset - _lastScrollOffset;
     if (_scrollDeltaSinceToggle == 0 ||
         (_scrollDeltaSinceToggle.isNegative == delta.isNegative)) {
@@ -405,7 +424,9 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
       _scrollDeltaSinceToggle = delta;
     }
 
-    if (_showQuickActions.value && currentOffset > 120 && _scrollDeltaSinceToggle > 56) {
+    if (_showQuickActions.value &&
+        currentOffset > 120 &&
+        _scrollDeltaSinceToggle > 56) {
       _showQuickActions.value = false;
       _scrollDeltaSinceToggle = 0;
     } else if (!_showQuickActions.value &&
@@ -426,7 +447,8 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
   Future<void> _initializeChapterSession(ChapterModel chapter) async {
     if (_activeChapterId == chapter.id) return;
     final previousChapterId = _activeChapterId;
-    final switchedChapter = previousChapterId != null && previousChapterId != chapter.id;
+    final switchedChapter =
+        previousChapterId != null && previousChapterId != chapter.id;
     _activeChapterId = chapter.id;
     _readingProgress.value = 0;
     _showQuickActions.value = true;
@@ -442,11 +464,9 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
       _isRestoringProgress = false;
     });
 
-    ref.read(readerProvider.notifier).open(
-          chapter.novelId,
-          chapter.id,
-          chapter.number,
-        );
+    ref
+        .read(readerProvider.notifier)
+        .open(chapter.novelId, chapter.id, chapter.number);
 
     _consumePendingAutoStartForChapter(chapter);
 
@@ -505,8 +525,8 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
     final tts = ref.read(ttsProvider);
     // Only auto-start on the target chapter when TTS is actively PLAYING.
     // If paused, the user intentionally stopped – do not resume on navigation.
-    final isActivelyPlaying = tts.contentKey == currentChapterId &&
-        tts.status == TtsStatus.playing;
+    final isActivelyPlaying =
+        tts.contentKey == currentChapterId && tts.status == TtsStatus.playing;
     if (!isActivelyPlaying) return;
     final notifier = ref.read(ttsProvider.notifier);
     unawaited(notifier.pause());
@@ -591,39 +611,52 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
                     const Divider(height: 1),
                     Expanded(
                       child: chaptersAsync.when(
-                        loading: () => const Center(child: CircularProgressIndicator()),
-                        error: (e, _) => Center(child: Text('Không tải được mục lục: $e')),
+                        loading: () =>
+                            const Center(child: CircularProgressIndicator()),
+                        error: (e, _) =>
+                            Center(child: Text('Không tải được mục lục: $e')),
                         data: (chapters) {
                           if (chapters.isEmpty) {
-                            return const Center(child: Text('Chưa có danh sách chương.'));
+                            return const Center(
+                              child: Text('Chưa có danh sách chương.'),
+                            );
                           }
                           // Find index of current chapter for auto-scroll
-                          final currentIndex = chapters.indexWhere((ch) => ch.id == currentChapter.id);
+                          final currentIndex = chapters.indexWhere(
+                            (ch) => ch.id == currentChapter.id,
+                          );
                           final scrollController = ScrollController(
                             initialScrollOffset: currentIndex > 0
-                                ? currentIndex * 48.0 // Approximate height per ListTile
+                                ? currentIndex *
+                                      48.0 // Approximate height per ListTile
                                 : 0,
                           );
-                          
+
                           return ListView.separated(
                             controller: scrollController,
                             itemCount: chapters.length,
-                            separatorBuilder: (_, _) => const Divider(height: 1),
+                            separatorBuilder: (_, _) =>
+                                const Divider(height: 1),
                             itemBuilder: (context, index) {
                               final item = chapters[index];
                               final isCurrent = item.id == currentChapter.id;
                               return ListTile(
                                 dense: true,
                                 selected: isCurrent,
-                                selectedTileColor:
-                                    Theme.of(context).colorScheme.primaryContainer.withAlpha(90),
+                                selectedTileColor: Theme.of(
+                                  context,
+                                ).colorScheme.primaryContainer.withAlpha(90),
                                 title: Text(
                                   'Chương ${item.number}: ${item.title}',
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
                                 ),
-                                trailing:
-                                    isCurrent ? const Icon(Icons.menu_book_rounded, size: 18) : null,
+                                trailing: isCurrent
+                                    ? const Icon(
+                                        Icons.menu_book_rounded,
+                                        size: 18,
+                                      )
+                                    : null,
                                 onTap: () {
                                   Navigator.of(context).pop();
                                   if (!isCurrent) {
@@ -631,7 +664,9 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
                                       currentChapter.id,
                                       item.id,
                                     );
-                                    context.pushReplacement(RouteNames.readerChapter(item.id));
+                                    context.pushReplacement(
+                                      RouteNames.readerChapter(item.id),
+                                    );
                                   }
                                 },
                               );
@@ -691,7 +726,9 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
               child: DecoratedBox(
                 decoration: BoxDecoration(
                   color: Theme.of(context).colorScheme.surface,
-                  borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+                  borderRadius: const BorderRadius.vertical(
+                    top: Radius.circular(28),
+                  ),
                 ),
                 child: SafeArea(
                   top: false,
@@ -705,7 +742,12 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  Text('Tùy chỉnh đọc', style: Theme.of(context).textTheme.headlineSmall),
+                                  Text(
+                                    'Tùy chỉnh đọc',
+                                    style: Theme.of(
+                                      context,
+                                    ).textTheme.headlineSmall,
+                                  ),
                                 ],
                               ),
                             ),
@@ -727,15 +769,22 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
                           child: Column(
                             children: [
                               Padding(
-                                padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+                                padding: const EdgeInsets.fromLTRB(
+                                  16,
+                                  12,
+                                  16,
+                                  8,
+                                ),
                                 child: Container(
                                   height: 52,
                                   padding: const EdgeInsets.all(4),
                                   decoration: BoxDecoration(
-                                    color: colorScheme.surfaceContainerHighest.withAlpha(180),
+                                    color: colorScheme.surfaceContainerHighest
+                                        .withAlpha(180),
                                     borderRadius: BorderRadius.circular(24),
                                     border: Border.all(
-                                      color: colorScheme.outlineVariant.withAlpha(160),
+                                      color: colorScheme.outlineVariant
+                                          .withAlpha(160),
                                     ),
                                   ),
                                   child: TabBar(
@@ -744,13 +793,21 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
                                     padding: EdgeInsets.zero,
                                     labelPadding: EdgeInsets.zero,
                                     indicatorSize: TabBarIndicatorSize.tab,
-                                    splashBorderRadius: BorderRadius.circular(18),
-                                    overlayColor: WidgetStateProperty.resolveWith((states) {
-                                      if (states.contains(WidgetState.pressed)) {
-                                        return colorScheme.primary.withAlpha(18);
-                                      }
-                                      return null;
-                                    }),
+                                    splashBorderRadius: BorderRadius.circular(
+                                      18,
+                                    ),
+                                    overlayColor:
+                                        WidgetStateProperty.resolveWith((
+                                          states,
+                                        ) {
+                                          if (states.contains(
+                                            WidgetState.pressed,
+                                          )) {
+                                            return colorScheme.primary
+                                                .withAlpha(18);
+                                          }
+                                          return null;
+                                        }),
                                     indicator: BoxDecoration(
                                       color: colorScheme.surface,
                                       borderRadius: BorderRadius.circular(18),
@@ -763,7 +820,8 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
                                       ],
                                     ),
                                     labelColor: colorScheme.onSurface,
-                                    unselectedLabelColor: colorScheme.onSurfaceVariant,
+                                    unselectedLabelColor:
+                                        colorScheme.onSurfaceVariant,
                                     tabs: [
                                       _TabLabel(
                                         icon: Icons.text_fields_rounded,
@@ -796,55 +854,95 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
                                       physics: const BouncingScrollPhysics(
                                         parent: AlwaysScrollableScrollPhysics(),
                                       ),
-                                      padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+                                      padding: const EdgeInsets.fromLTRB(
+                                        16,
+                                        8,
+                                        16,
+                                        24,
+                                      ),
                                       children: [
                                         SettingsSection(
                                           title: 'Kiểu chữ',
                                           child: Column(
-                                            crossAxisAlignment: CrossAxisAlignment.start,
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.start,
                                             children: [
                                               SegmentedButton<String>(
                                                 segments: const [
-                                                  ButtonSegment(value: 'serif', label: Text('Có chân')),
-                                                  ButtonSegment(value: 'sans', label: Text('Không chân')),
-                                                  ButtonSegment(value: 'mono', label: Text('Đơn cách')),
+                                                  ButtonSegment(
+                                                    value: 'serif',
+                                                    label: Text('Có chân'),
+                                                  ),
+                                                  ButtonSegment(
+                                                    value: 'sans',
+                                                    label: Text('Không chân'),
+                                                  ),
+                                                  ButtonSegment(
+                                                    value: 'mono',
+                                                    label: Text('Đơn cách'),
+                                                  ),
                                                 ],
                                                 selected: {
-                                                  {'serif', 'sans', 'mono'}.contains(settings.fontFamily)
+                                                  {
+                                                        'serif',
+                                                        'sans',
+                                                        'mono',
+                                                      }.contains(
+                                                        settings.fontFamily,
+                                                      )
                                                       ? settings.fontFamily
                                                       : 'serif',
                                                 },
-                                                onSelectionChanged: (s) => update(
-                                                  settings.copyWith(fontFamily: s.first),
-                                                ),
+                                                onSelectionChanged: (s) =>
+                                                    update(
+                                                      settings.copyWith(
+                                                        fontFamily: s.first,
+                                                      ),
+                                                    ),
                                               ),
                                               const SizedBox(height: 12),
                                               LabeledSlider(
                                                 label: 'Cỡ chữ',
-                                                valueLabel: settings.fontSize.toStringAsFixed(0),
+                                                valueLabel: settings.fontSize
+                                                    .toStringAsFixed(0),
                                                 min: 12,
                                                 max: 32,
                                                 divisions: 10,
                                                 value: settings.fontSize,
-                                                onChanged: (v) => update(settings.copyWith(fontSize: v)),
+                                                onChanged: (v) => update(
+                                                  settings.copyWith(
+                                                    fontSize: v,
+                                                  ),
+                                                ),
                                               ),
                                               LabeledSlider(
                                                 label: 'Giãn dòng',
-                                                valueLabel: settings.lineHeight.toStringAsFixed(1),
+                                                valueLabel: settings.lineHeight
+                                                    .toStringAsFixed(1),
                                                 min: 1.2,
                                                 max: 3.0,
                                                 divisions: 9,
                                                 value: settings.lineHeight,
-                                                onChanged: (v) => update(settings.copyWith(lineHeight: v)),
+                                                onChanged: (v) => update(
+                                                  settings.copyWith(
+                                                    lineHeight: v,
+                                                  ),
+                                                ),
                                               ),
                                               LabeledSlider(
                                                 label: 'Khoảng cách chữ',
-                                                valueLabel: settings.letterSpacing.toStringAsFixed(1),
+                                                valueLabel: settings
+                                                    .letterSpacing
+                                                    .toStringAsFixed(1),
                                                 min: 0,
                                                 max: 4,
                                                 divisions: 8,
                                                 value: settings.letterSpacing,
-                                                onChanged: (v) => update(settings.copyWith(letterSpacing: v)),
+                                                onChanged: (v) => update(
+                                                  settings.copyWith(
+                                                    letterSpacing: v,
+                                                  ),
+                                                ),
                                               ),
                                             ],
                                           ),
@@ -855,49 +953,76 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
                                       physics: const BouncingScrollPhysics(
                                         parent: AlwaysScrollableScrollPhysics(),
                                       ),
-                                      padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+                                      padding: const EdgeInsets.fromLTRB(
+                                        16,
+                                        8,
+                                        16,
+                                        24,
+                                      ),
                                       children: [
                                         SettingsSection(
                                           title: 'Giao diện đọc',
                                           child: Column(
-                                            crossAxisAlignment: CrossAxisAlignment.start,
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.start,
                                             children: [
                                               Text(
                                                 'Màu nền',
-                                                style: Theme.of(context).textTheme.labelLarge,
+                                                style: Theme.of(
+                                                  context,
+                                                ).textTheme.labelLarge,
                                               ),
                                               const SizedBox(height: 8),
                                               Wrap(
                                                 spacing: 10,
                                                 runSpacing: 10,
-                                                children: _backgroundColorChoices.map((color) {
-                                                  return ColorOptionChip(
-                                                    color: color,
-                                                    selected: settings.backgroundColorValue == color.toARGB32(),
-                                                    onTap: () => update(
-                                                      settings.copyWith(backgroundColorValue: color.toARGB32()),
-                                                    ),
-                                                  );
-                                                }).toList(),
+                                                children: _backgroundColorChoices
+                                                    .map((color) {
+                                                      return ColorOptionChip(
+                                                        color: color,
+                                                        selected:
+                                                            settings
+                                                                .backgroundColorValue ==
+                                                            color.toARGB32(),
+                                                        onTap: () => update(
+                                                          settings.copyWith(
+                                                            backgroundColorValue:
+                                                                color
+                                                                    .toARGB32(),
+                                                          ),
+                                                        ),
+                                                      );
+                                                    })
+                                                    .toList(),
                                               ),
                                               const SizedBox(height: 14),
                                               Text(
                                                 'Màu chữ',
-                                                style: Theme.of(context).textTheme.labelLarge,
+                                                style: Theme.of(
+                                                  context,
+                                                ).textTheme.labelLarge,
                                               ),
                                               const SizedBox(height: 8),
                                               Wrap(
                                                 spacing: 10,
                                                 runSpacing: 10,
-                                                children: _textColorChoices.map((color) {
-                                                  return ColorOptionChip(
-                                                    color: color,
-                                                    selected: settings.textColorValue == color.toARGB32(),
-                                                    onTap: () => update(
-                                                      settings.copyWith(textColorValue: color.toARGB32()),
-                                                    ),
-                                                  );
-                                                }).toList(),
+                                                children: _textColorChoices.map(
+                                                  (color) {
+                                                    return ColorOptionChip(
+                                                      color: color,
+                                                      selected:
+                                                          settings
+                                                              .textColorValue ==
+                                                          color.toARGB32(),
+                                                      onTap: () => update(
+                                                        settings.copyWith(
+                                                          textColorValue: color
+                                                              .toARGB32(),
+                                                        ),
+                                                      ),
+                                                    );
+                                                  },
+                                                ).toList(),
                                               ),
                                             ],
                                           ),
@@ -908,42 +1033,81 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
                                       physics: const BouncingScrollPhysics(
                                         parent: AlwaysScrollableScrollPhysics(),
                                       ),
-                                      padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+                                      padding: const EdgeInsets.fromLTRB(
+                                        16,
+                                        8,
+                                        16,
+                                        24,
+                                      ),
                                       children: [
                                         SettingsSection(
                                           title: 'Bố cục trang',
                                           child: Column(
-                                            crossAxisAlignment: CrossAxisAlignment.start,
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.start,
                                             children: [
-                                              Text('Canh chữ', style: Theme.of(context).textTheme.labelLarge),
+                                              Text(
+                                                'Canh chữ',
+                                                style: Theme.of(
+                                                  context,
+                                                ).textTheme.labelLarge,
+                                              ),
                                               const SizedBox(height: 8),
                                               SegmentedButton<String>(
                                                 segments: const [
-                                                  ButtonSegment(value: 'left', label: Text('Trái')),
-                                                  ButtonSegment(value: 'justify', label: Text('Đều')),
-                                                  ButtonSegment(value: 'center', label: Text('Giữa')),
+                                                  ButtonSegment(
+                                                    value: 'left',
+                                                    label: Text('Trái'),
+                                                  ),
+                                                  ButtonSegment(
+                                                    value: 'justify',
+                                                    label: Text('Đều'),
+                                                  ),
+                                                  ButtonSegment(
+                                                    value: 'center',
+                                                    label: Text('Giữa'),
+                                                  ),
                                                 ],
                                                 selected: {settings.textAlign},
-                                                onSelectionChanged: (s) => update(settings.copyWith(textAlign: s.first)),
+                                                onSelectionChanged: (s) =>
+                                                    update(
+                                                      settings.copyWith(
+                                                        textAlign: s.first,
+                                                      ),
+                                                    ),
                                               ),
                                               const SizedBox(height: 12),
                                               LabeledSlider(
                                                 label: 'Lề ngang',
-                                                valueLabel: settings.horizontalPadding.toStringAsFixed(0),
+                                                valueLabel: settings
+                                                    .horizontalPadding
+                                                    .toStringAsFixed(0),
                                                 min: 12,
                                                 max: 36,
                                                 divisions: 8,
-                                                value: settings.horizontalPadding,
-                                                onChanged: (v) => update(settings.copyWith(horizontalPadding: v)),
+                                                value:
+                                                    settings.horizontalPadding,
+                                                onChanged: (v) => update(
+                                                  settings.copyWith(
+                                                    horizontalPadding: v,
+                                                  ),
+                                                ),
                                               ),
                                               LabeledSlider(
                                                 label: 'Khoảng cách đoạn',
-                                                valueLabel: settings.paragraphSpacing.toStringAsFixed(0),
+                                                valueLabel: settings
+                                                    .paragraphSpacing
+                                                    .toStringAsFixed(0),
                                                 min: 8,
                                                 max: 36,
                                                 divisions: 7,
-                                                value: settings.paragraphSpacing,
-                                                onChanged: (v) => update(settings.copyWith(paragraphSpacing: v)),
+                                                value:
+                                                    settings.paragraphSpacing,
+                                                onChanged: (v) => update(
+                                                  settings.copyWith(
+                                                    paragraphSpacing: v,
+                                                  ),
+                                                ),
                                               ),
                                             ],
                                           ),
@@ -954,24 +1118,38 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
                                       physics: const BouncingScrollPhysics(
                                         parent: AlwaysScrollableScrollPhysics(),
                                       ),
-                                      padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+                                      padding: const EdgeInsets.fromLTRB(
+                                        16,
+                                        8,
+                                        16,
+                                        24,
+                                      ),
                                       children: [
                                         SettingsSection(
                                           title: 'TTS tiếng Việt',
                                           child: Column(
-                                            crossAxisAlignment: CrossAxisAlignment.start,
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.start,
                                             children: [
                                               SwitchListTile.adaptive(
                                                 contentPadding: EdgeInsets.zero,
-                                                value: settings.enableSentenceTapTts,
+                                                value: settings
+                                                    .enableSentenceTapTts,
                                                 onChanged: (enabled) {
                                                   unawaited(
                                                     ref
-                                                        .read(readingSettingsProvider.notifier)
-                                                        .setSentenceTapTtsEnabled(enabled),
+                                                        .read(
+                                                          readingSettingsProvider
+                                                              .notifier,
+                                                        )
+                                                        .setSentenceTapTtsEnabled(
+                                                          enabled,
+                                                        ),
                                                   );
                                                 },
-                                                title: const Text('Bật chạm câu để phát TTS'),
+                                                title: const Text(
+                                                  'Bật chạm câu để phát TTS',
+                                                ),
                                                 subtitle: const Text(
                                                   'Tắt để tránh chạm nhầm làm bắt đầu TTS.',
                                                 ),
@@ -981,19 +1159,35 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
                                                 children: [
                                                   Expanded(
                                                     child: Text(
-                                                      tts.voiceName ?? tts.language,
-                                                      style: Theme.of(context).textTheme.titleSmall,
+                                                      tts.voiceName ??
+                                                          tts.language,
+                                                      style: Theme.of(
+                                                        context,
+                                                      ).textTheme.titleSmall,
                                                     ),
                                                   ),
                                                   Container(
-                                                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                                    padding:
+                                                        const EdgeInsets.symmetric(
+                                                          horizontal: 10,
+                                                          vertical: 6,
+                                                        ),
                                                     decoration: BoxDecoration(
-                                                      color: Theme.of(context).colorScheme.secondaryContainer,
-                                                      borderRadius: BorderRadius.circular(999),
+                                                      color: Theme.of(context)
+                                                          .colorScheme
+                                                          .secondaryContainer,
+                                                      borderRadius:
+                                                          BorderRadius.circular(
+                                                            999,
+                                                          ),
                                                     ),
                                                     child: Text(
-                                                      formatTtsSpeedLabel(tts.speed),
-                                                      style: Theme.of(context).textTheme.labelLarge,
+                                                      formatTtsSpeedLabel(
+                                                        tts.speed,
+                                                      ),
+                                                      style: Theme.of(
+                                                        context,
+                                                      ).textTheme.labelLarge,
                                                     ),
                                                   ),
                                                 ],
@@ -1002,51 +1196,85 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
                                               Wrap(
                                                 spacing: 8,
                                                 runSpacing: 8,
-                                                children: [0.45, 0.675, 0.9, 1.125, 1.35, 1.8].map((speed) {
-                                                  final selected = tts.speed == speed;
-                                                  return ChoiceChip(
-                                                    label: Text(formatTtsSpeedLabel(speed)),
-                                                    selected: selected,
-                                                    onSelected: (_) => ttsNotifier.setSpeed(speed),
-                                                  );
-                                                }).toList(),
+                                                children:
+                                                    [
+                                                      0.45,
+                                                      0.675,
+                                                      0.9,
+                                                      1.125,
+                                                      1.35,
+                                                      1.8,
+                                                    ].map((speed) {
+                                                      final selected =
+                                                          tts.speed == speed;
+                                                      return ChoiceChip(
+                                                        label: Text(
+                                                          formatTtsSpeedLabel(
+                                                            speed,
+                                                          ),
+                                                        ),
+                                                        selected: selected,
+                                                        onSelected: (_) =>
+                                                            ttsNotifier
+                                                                .setSpeed(
+                                                                  speed,
+                                                                ),
+                                                      );
+                                                    }).toList(),
                                               ),
                                               const SizedBox(height: 12),
                                               Container(
                                                 width: double.infinity,
-                                                padding: const EdgeInsets.all(12),
+                                                padding: const EdgeInsets.all(
+                                                  12,
+                                                ),
                                                 decoration: BoxDecoration(
                                                   color: Theme.of(context)
                                                       .colorScheme
                                                       .secondaryContainer
                                                       .withAlpha(90),
-                                                  borderRadius: BorderRadius.circular(12),
+                                                  borderRadius:
+                                                      BorderRadius.circular(12),
                                                   border: Border.all(
-                                                    color: Theme.of(context).colorScheme.outlineVariant,
+                                                    color: Theme.of(context)
+                                                        .colorScheme
+                                                        .outlineVariant,
                                                   ),
                                                 ),
                                                 child: Column(
-                                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                                  crossAxisAlignment:
+                                                      CrossAxisAlignment.start,
                                                   children: [
                                                     Text(
                                                       'Điều kiện bắt buộc để TTS chạy ổn định',
-                                                      style: Theme.of(context).textTheme.titleSmall,
+                                                      style: Theme.of(
+                                                        context,
+                                                      ).textTheme.titleSmall,
                                                     ),
                                                     const SizedBox(height: 8),
                                                     Row(
                                                       children: [
                                                         Icon(
                                                           tts.backgroundModeEnabled
-                                                              ? Icons.check_circle
-                                                              : Icons.radio_button_unchecked,
+                                                              ? Icons
+                                                                    .check_circle
+                                                              : Icons
+                                                                    .radio_button_unchecked,
                                                           size: 18,
-                                                          color: tts.backgroundModeEnabled
-                                                              ? _successColor(context)
-                                                              : Theme.of(context)
-                                                                  .colorScheme
-                                                                  .onSurfaceVariant,
+                                                          color:
+                                                              tts.backgroundModeEnabled
+                                                              ? _successColor(
+                                                                  context,
+                                                                )
+                                                              : Theme.of(
+                                                                      context,
+                                                                    )
+                                                                    .colorScheme
+                                                                    .onSurfaceVariant,
                                                         ),
-                                                        const SizedBox(width: 8),
+                                                        const SizedBox(
+                                                          width: 8,
+                                                        ),
                                                         const Expanded(
                                                           child: Text(
                                                             'Bật chạy nền cho TTS',
@@ -1059,16 +1287,25 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
                                                       children: [
                                                         Icon(
                                                           tts.batteryOptimizationIgnored
-                                                              ? Icons.check_circle
-                                                              : Icons.radio_button_unchecked,
+                                                              ? Icons
+                                                                    .check_circle
+                                                              : Icons
+                                                                    .radio_button_unchecked,
                                                           size: 18,
-                                                          color: tts.batteryOptimizationIgnored
-                                                              ? _successColor(context)
-                                                              : Theme.of(context)
-                                                                  .colorScheme
-                                                                  .onSurfaceVariant,
+                                                          color:
+                                                              tts.batteryOptimizationIgnored
+                                                              ? _successColor(
+                                                                  context,
+                                                                )
+                                                              : Theme.of(
+                                                                      context,
+                                                                    )
+                                                                    .colorScheme
+                                                                    .onSurfaceVariant,
                                                         ),
-                                                        const SizedBox(width: 8),
+                                                        const SizedBox(
+                                                          width: 8,
+                                                        ),
                                                         const Expanded(
                                                           child: Text(
                                                             'Loại trừ tối ưu pin',
@@ -1078,48 +1315,70 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
                                                     ),
                                                     const SizedBox(height: 10),
                                                     Align(
-                                                      alignment: Alignment.centerRight,
+                                                      alignment:
+                                                          Alignment.centerRight,
                                                       child: OutlinedButton(
                                                         onPressed: () async {
-                                                          await ttsNotifier.setBackgroundModeEnabled(true);
-                                                          await ttsNotifier.ensureBatteryOptimizationIgnored();
+                                                          await ttsNotifier
+                                                              .setBackgroundModeEnabled(
+                                                                true,
+                                                              );
+                                                          await ttsNotifier
+                                                              .ensureBatteryOptimizationIgnored();
                                                         },
-                                                        child: const Text('Bật ngay'),
+                                                        child: const Text(
+                                                          'Bật ngay',
+                                                        ),
                                                       ),
                                                     ),
                                                   ],
                                                 ),
                                               ),
                                               const SizedBox(height: 12),
-                                              if (tts.availableVietnameseVoices.isNotEmpty)
+                                              if (tts
+                                                  .availableVietnameseVoices
+                                                  .isNotEmpty)
                                                 DropdownButtonFormField<String>(
                                                   initialValue: tts.voiceName,
                                                   isExpanded: true,
                                                   decoration: const InputDecoration(
-                                                    labelText: 'Giọng đọc tiếng Việt',
-                                                    border: OutlineInputBorder(),
+                                                    labelText:
+                                                        'Giọng đọc tiếng Việt',
+                                                    border:
+                                                        OutlineInputBorder(),
                                                   ),
-                                                  items: tts.availableVietnameseVoices
+                                                  items: tts
+                                                      .availableVietnameseVoices
                                                       .map(
-                                                        (v) => DropdownMenuItem<String>(
-                                                          value: v.name,
-                                                          child: Text(
-                                                            v.displayName,
-                                                            overflow: TextOverflow.ellipsis,
-                                                          ),
-                                                        ),
+                                                        (v) =>
+                                                            DropdownMenuItem<
+                                                              String
+                                                            >(
+                                                              value: v.name,
+                                                              child: Text(
+                                                                v.displayName,
+                                                                overflow:
+                                                                    TextOverflow
+                                                                        .ellipsis,
+                                                              ),
+                                                            ),
                                                       )
                                                       .toList(),
                                                   onChanged: (value) {
                                                     if (value != null) {
-                                                      ttsNotifier.setVoiceByName(value);
+                                                      ttsNotifier
+                                                          .setVoiceByName(
+                                                            value,
+                                                          );
                                                     }
                                                   },
                                                 )
                                               else
                                                 Text(
                                                   'Thiết bị không cung cấp nhiều giọng tiếng Việt. Đang dùng ${tts.voiceName ?? tts.language}.',
-                                                  style: Theme.of(context).textTheme.bodySmall,
+                                                  style: Theme.of(
+                                                    context,
+                                                  ).textTheme.bodySmall,
                                                 ),
                                               const SizedBox(height: 12),
                                               TtsPlayerWidget(
@@ -1168,7 +1427,12 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
     final readerTextColor = Color(settings.textColorValue);
     final readerMutedColor = readerTextColor.withAlpha(170);
 
-    return Scaffold(
+    return AnnotatedRegion<SystemUiOverlayStyle>(
+      value: ThemeData.estimateBrightnessForColor(readerBackground) == Brightness.dark
+          ? SystemUiOverlayStyle.light
+          : SystemUiOverlayStyle.dark,
+      child: Scaffold(
+      backgroundColor: readerBackground,
       body: chapterAsync.when(
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (e, _) => Center(
@@ -1179,7 +1443,8 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
               const SizedBox(height: 8),
               Text('Lỗi tải chương: $e'),
               FilledButton(
-                onPressed: () => ref.invalidate(chapterProvider(widget.chapterId)),
+                onPressed: () =>
+                    ref.invalidate(chapterProvider(widget.chapterId)),
                 child: const Text('Thử lại'),
               ),
             ],
@@ -1188,13 +1453,17 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
         data: (chapter) {
           final paragraphs = _paragraphsOf(chapter.content);
           _ensureParagraphKeys(paragraphs.length);
-          final sentenceSlicesByParagraph =
-              _sentenceSlicesForChapter(chapter, paragraphs);
+          final sentenceSlicesByParagraph = _sentenceSlicesForChapter(
+            chapter,
+            paragraphs,
+          );
           final textAlign = _textAlignFor(settings.textAlign);
           final novelAsync = ref.watch(novelDetailProvider(chapter.novelId));
           final tts = ref.watch(ttsProvider);
-          final shouldHighlightTts = tts.contentKey == chapter.id &&
-              (tts.status == TtsStatus.playing || tts.status == TtsStatus.paused);
+          final shouldHighlightTts =
+              tts.contentKey == chapter.id &&
+              (tts.status == TtsStatus.playing ||
+                  tts.status == TtsStatus.paused);
           final paragraphStyle = TextStyle(
             color: readerTextColor,
             fontSize: settings.fontSize,
@@ -1203,10 +1472,11 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
             fontFamily: _resolveReaderFontFamily(settings.fontFamily),
           );
           final paragraphHighlightStyle = paragraphStyle.copyWith(
-            backgroundColor: Theme.of(context).colorScheme.primary.withAlpha(80),
+            backgroundColor: Theme.of(
+              context,
+            ).colorScheme.primary.withAlpha(80),
             fontWeight: FontWeight.w600,
           );
-
 
           _maybeAutoScrollToTtsParagraph(tts, paragraphs.length);
           WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -1216,254 +1486,364 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
           return ColoredBox(
             color: readerBackground,
             child: Column(
-                children: [
-                  ValueListenableBuilder<double>(
-                    valueListenable: _readingProgress,
-                    builder: (context, progress, _) {
-                      return _TopBar(
-                        title: _chapterTopBarTitle(chapter),
-                        progress: progress,
-                        onOpenSettings: () => _openReadingSettingsSheet(
-                          chapter.content,
-                          chapter.id,
-                          'Chương ${chapter.number}: ${chapter.title}',
-                          chapter.nextChapterId,
-                          chapter.number,
-                        ),
-                        barBackgroundColor: readerBackground,
-                        foregroundColor: readerTextColor,
+              children: [
+                ValueListenableBuilder<double>(
+                  valueListenable: _readingProgress,
+                  builder: (context, progress, _) {
+                    return _TopBar(
+                      title: _chapterTopBarTitle(chapter),
+                      progress: progress,
+                      onOpenSettings: () => _openReadingSettingsSheet(
+                        chapter.content,
+                        chapter.id,
+                        'Chương ${chapter.number}: ${chapter.title}',
+                        chapter.nextChapterId,
+                        chapter.number,
+                      ),
+                      barBackgroundColor: readerBackground,
+                      foregroundColor: readerTextColor,
+                    );
+                  },
+                ),
+                Expanded(
+                  child: AnimatedSwitcher(
+                    duration: const Duration(milliseconds: 220),
+                    switchInCurve: Curves.easeOutCubic,
+                    switchOutCurve: Curves.easeInCubic,
+                    transitionBuilder: (child, animation) {
+                      final beginOffset = _chapterDirection < 0
+                          ? const Offset(-0.08, 0)
+                          : const Offset(0.08, 0);
+                      final fade = CurvedAnimation(
+                        parent: animation,
+                        curve: Curves.easeOut,
+                      );
+                      final slide = Tween<Offset>(
+                        begin: beginOffset,
+                        end: Offset.zero,
+                      ).animate(fade);
+                      return FadeTransition(
+                        opacity: fade,
+                        child: SlideTransition(position: slide, child: child),
                       );
                     },
-                  ),
-                  Expanded(
-                    child: AnimatedSwitcher(
-                      duration: const Duration(milliseconds: 220),
-                      switchInCurve: Curves.easeOutCubic,
-                      switchOutCurve: Curves.easeInCubic,
-                      transitionBuilder: (child, animation) {
-                        final beginOffset =
-                            _chapterDirection < 0 ? const Offset(-0.08, 0) : const Offset(0.08, 0);
-                        final fade = CurvedAnimation(parent: animation, curve: Curves.easeOut);
-                        final slide = Tween<Offset>(
-                          begin: beginOffset,
-                          end: Offset.zero,
-                        ).animate(fade);
-                        return FadeTransition(
-                          opacity: fade,
-                          child: SlideTransition(position: slide, child: child),
-                        );
-                      },
-                      child: KeyedSubtree(
-                        key: ValueKey(chapter.id),
-                        child: Scrollbar(
+                    child: KeyedSubtree(
+                      key: ValueKey(chapter.id),
+                      child: Scrollbar(
+                        controller: _scrollCtrl,
+                        child: CustomScrollView(
                           controller: _scrollCtrl,
-                          child: CustomScrollView(
-                            controller: _scrollCtrl,
-                            slivers: [
-                              SliverPadding(
-                                padding: EdgeInsets.fromLTRB(
-                                  settings.horizontalPadding,
-                                  16,
-                                  settings.horizontalPadding,
-                                  chapter.content.trim().isEmpty ? 24 : 0,
-                                ),
-                                sliver: SliverToBoxAdapter(
-                                  child: Align(
-                                    alignment: Alignment.topCenter,
-                                    child: ConstrainedBox(
-                                      constraints: const BoxConstraints(maxWidth: 760),
-                                      child: Column(
-                                        crossAxisAlignment: CrossAxisAlignment.start,
-                                        children: [
-                                          novelAsync.when(
-                                            loading: () => Text(
-                                              'Đang tải tên truyện...',
-                                              style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                                                    color: readerMutedColor,
-                                                  ),
-                                            ),
-                                            error: (_, _) => const SizedBox.shrink(),
-                                            data: (novel) => Text(
-                                              novel.title,
-                                              maxLines: 1,
-                                              overflow: TextOverflow.ellipsis,
-                                              style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                                                    color: readerMutedColor,
-                                                    letterSpacing: 0.2,
-                                                  ),
-                                            ),
-                                          ),
-                                          const SizedBox(height: 4),
-                                          Text(
-                                            'Chương ${chapter.number}: ${chapter.title}',
+                          slivers: [
+                            SliverPadding(
+                              padding: EdgeInsets.fromLTRB(
+                                settings.horizontalPadding,
+                                16,
+                                settings.horizontalPadding,
+                                chapter.content.trim().isEmpty ? 24 : 0,
+                              ),
+                              sliver: SliverToBoxAdapter(
+                                child: Align(
+                                  alignment: Alignment.topCenter,
+                                  child: ConstrainedBox(
+                                    constraints: const BoxConstraints(
+                                      maxWidth: 760,
+                                    ),
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        novelAsync.when(
+                                          loading: () => Text(
+                                            'Đang tải tên truyện...',
                                             style: Theme.of(context)
                                                 .textTheme
-                                                .titleLarge
-                                                ?.copyWith(color: readerTextColor),
+                                                .labelSmall
+                                                ?.copyWith(
+                                                  color: readerMutedColor,
+                                                ),
                                           ),
-                                          const SizedBox(height: 12),
-                                          const SizedBox(height: 12),
-                                          if (chapter.content.trim().isEmpty)
-                                            Text(
-                                              'Chương này hiện chưa có nội dung.',
-                                              style: Theme.of(context)
-                                                  .textTheme
-                                                  .bodyMedium
-                                                  ?.copyWith(color: readerMutedColor),
-                                            ),
-                                        ],
-                                      ),
+                                          error: (_, _) =>
+                                              const SizedBox.shrink(),
+                                          data: (novel) => Text(
+                                            novel.title,
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: Theme.of(context)
+                                                .textTheme
+                                                .labelSmall
+                                                ?.copyWith(
+                                                  color: readerMutedColor,
+                                                  letterSpacing: 0.2,
+                                                ),
+                                          ),
+                                        ),
+                                        const SizedBox(height: 4),
+                                        Text(
+                                          'Chương ${chapter.number}: ${chapter.title}',
+                                          style: Theme.of(context)
+                                              .textTheme
+                                              .titleLarge
+                                              ?.copyWith(
+                                                color: readerTextColor,
+                                              ),
+                                        ),
+                                        const SizedBox(height: 12),
+                                        const SizedBox(height: 12),
+                                        if (chapter.content.trim().isEmpty)
+                                          Text(
+                                            'Chương này hiện chưa có nội dung.',
+                                            style: Theme.of(context)
+                                                .textTheme
+                                                .bodyMedium
+                                                ?.copyWith(
+                                                  color: readerMutedColor,
+                                                ),
+                                          ),
+                                      ],
                                     ),
                                   ),
                                 ),
                               ),
-                              if (chapter.content.trim().isNotEmpty)
-                                SliverPadding(
-                                  padding: EdgeInsets.fromLTRB(
-                                    settings.horizontalPadding,
-                                    0,
-                                    settings.horizontalPadding,
-                                    0,
-                                  ),
-                                  sliver: SliverList.builder(
-                                    itemCount: paragraphs.length,
-                                    itemBuilder: (context, index) {
-                                      final sentenceSlices = sentenceSlicesByParagraph[index];
-                                      return Align(
-                                        alignment: Alignment.topCenter,
-                                        child: ConstrainedBox(
-                                          constraints: const BoxConstraints(maxWidth: 760),
-                                          child: SizedBox(
-                                            width: double.infinity,
-                                            child: Padding(
-                                              key: _paragraphKeys[index],
-                                              padding: EdgeInsets.only(
-                                                bottom: index == paragraphs.length - 1
-                                                    ? 0
-                                                    : settings.paragraphSpacing,
-                                              ),
-                                              child: _buildParagraphText(
-                                                context: context,
-                                                sentenceSlices: sentenceSlices,
-                                                textAlign: textAlign,
-                                                style: paragraphStyle,
-                                                highlightStyle: paragraphHighlightStyle,
-                                                isActiveParagraph: shouldHighlightTts &&
-                                                    tts.activeParagraphIndex == index,
-                                                highlightStart: tts.progressStart,
-                                                highlightEnd: tts.progressEnd,
-                                                onSentenceTap: (charOffset) {
-                                                  final hasActiveTtsSession =
-                                                      tts.contentKey == chapter.id &&
-                                                      (tts.status == TtsStatus.playing ||
-                                                          tts.status == TtsStatus.paused);
-                                                  final canStartFromSentence =
-                                                      settings.enableSentenceTapTts || hasActiveTtsSession;
-                                                  if (!canStartFromSentence) {
-                                                    return;
-                                                  }
-                                                  // Synchronous unfocus clears stale SelectableText selection
-                                                  // before startReading triggers a widget rebuild + scroll.
-                                                  FocusManager.instance.primaryFocus?.unfocus();
-                                                  ref
-                                                      .read(ttsProvider.notifier)
-                                                      .clearPendingAutoStartChapter();
-                                                  ref.read(ttsProvider.notifier).startReading(
-                                                    chapter.content,
-                                                    contentKey: chapter.id,
-                                                    title: 'Chương ${chapter.number}: ${chapter.title}',
-                                                    nextChapterId: chapter.nextChapterId,
-                                                    chapterNumber: chapter.number,
-                                                    apiBaseUrl: AppConfig.baseUrl,
-                                                    startParagraphIndex: index,
-                                                    startCharOffset: charOffset,
-                                                  );
-                                                },
-                                                useTapRecognizer: settings.enableSentenceTapTts ||
-                                                    (tts.contentKey == chapter.id &&
-                                                        (tts.status == TtsStatus.playing ||
-                                                            tts.status == TtsStatus.paused)),
-                                              ),
+                            ),
+                            if (chapter.content.trim().isNotEmpty)
+                              SliverPadding(
+                                padding: EdgeInsets.fromLTRB(
+                                  settings.horizontalPadding,
+                                  0,
+                                  settings.horizontalPadding,
+                                  0,
+                                ),
+                                sliver: SliverList.builder(
+                                  itemCount: paragraphs.length,
+                                  itemBuilder: (context, index) {
+                                    final sentenceSlices =
+                                        sentenceSlicesByParagraph[index];
+                                    return Align(
+                                      alignment: Alignment.topCenter,
+                                      child: ConstrainedBox(
+                                        constraints: const BoxConstraints(
+                                          maxWidth: 760,
+                                        ),
+                                        child: SizedBox(
+                                          width: double.infinity,
+                                          child: Padding(
+                                            key: _paragraphKeys[index],
+                                            padding: EdgeInsets.only(
+                                              bottom:
+                                                  index == paragraphs.length - 1
+                                                  ? 0
+                                                  : settings.paragraphSpacing,
+                                            ),
+                                            child: _buildParagraphText(
+                                              context: context,
+                                              sentenceSlices: sentenceSlices,
+                                              textAlign: textAlign,
+                                              style: paragraphStyle,
+                                              highlightStyle:
+                                                  paragraphHighlightStyle,
+                                              isActiveParagraph:
+                                                  shouldHighlightTts &&
+                                                  tts.activeParagraphIndex ==
+                                                      index,
+                                              highlightStart: tts.progressStart,
+                                              highlightEnd: tts.progressEnd,
+                                              onSentenceTap: (charOffset) {
+                                                final hasActiveTtsSession =
+                                                    tts.contentKey ==
+                                                        chapter.id &&
+                                                    (tts.status ==
+                                                            TtsStatus.playing ||
+                                                        tts.status ==
+                                                            TtsStatus.paused);
+                                                final canStartFromSentence =
+                                                    settings
+                                                        .enableSentenceTapTts ||
+                                                    hasActiveTtsSession;
+                                                if (!canStartFromSentence) {
+                                                  return;
+                                                }
+                                                // Synchronous unfocus clears stale SelectableText selection
+                                                // before startReading triggers a widget rebuild + scroll.
+                                                FocusManager
+                                                    .instance
+                                                    .primaryFocus
+                                                    ?.unfocus();
+                                                ref
+                                                    .read(ttsProvider.notifier)
+                                                    .clearPendingAutoStartChapter();
+                                                ref
+                                                    .read(ttsProvider.notifier)
+                                                    .startReading(
+                                                      chapter.content,
+                                                      contentKey: chapter.id,
+                                                      title:
+                                                          'Chương ${chapter.number}: ${chapter.title}',
+                                                      nextChapterId:
+                                                          chapter.nextChapterId,
+                                                      chapterNumber:
+                                                          chapter.number,
+                                                      apiBaseUrl:
+                                                          AppConfig.baseUrl,
+                                                      startParagraphIndex:
+                                                          index,
+                                                      startCharOffset:
+                                                          charOffset,
+                                                    );
+                                              },
+                                              useTapRecognizer:
+                                                  settings
+                                                      .enableSentenceTapTts ||
+                                                  (tts.contentKey ==
+                                                          chapter.id &&
+                                                      (tts.status ==
+                                                              TtsStatus
+                                                                  .playing ||
+                                                          tts.status ==
+                                                              TtsStatus
+                                                                  .paused)),
                                             ),
                                           ),
                                         ),
-                                      );
-                                    },
-                                  ),
-                                ),
-                              SliverPadding(
-                                padding: EdgeInsets.fromLTRB(
-                                  settings.horizontalPadding,
-                                  40,
-                                  settings.horizontalPadding,
-                                  92,
-                                ),
-                                sliver: SliverToBoxAdapter(
-                                  child: Align(
-                                    alignment: Alignment.topCenter,
-                                    child: ConstrainedBox(
-                                      constraints: const BoxConstraints(maxWidth: 760),
-                                      child: _NavButtons(
-                                        chapter: chapter,
-                                        onGoPrevious: () => _goToPreviousChapter(chapter),
-                                        onGoNext: () => _goToNextChapter(chapter),
                                       ),
+                                    );
+                                  },
+                                ),
+                              ),
+                            SliverPadding(
+                              padding: EdgeInsets.fromLTRB(
+                                settings.horizontalPadding,
+                                40,
+                                settings.horizontalPadding,
+                                92,
+                              ),
+                              sliver: SliverToBoxAdapter(
+                                child: Align(
+                                  alignment: Alignment.topCenter,
+                                  child: ConstrainedBox(
+                                    constraints: const BoxConstraints(
+                                      maxWidth: 760,
+                                    ),
+                                    child: _NavButtons(
+                                      chapter: chapter,
+                                      onGoPrevious: () =>
+                                          _goToPreviousChapter(chapter),
+                                      onGoNext: () => _goToNextChapter(chapter),
                                     ),
                                   ),
                                 ),
                               ),
-                            ],
-                          ),
+                            ),
+                          ],
                         ),
                       ),
                     ),
                   ),
-                ],
-              ),
+                ),
+              ],
+            ),
           );
         },
       ),
       bottomNavigationBar: chapterAsync.whenOrNull(
         data: (chapter) {
           final tts = ref.watch(ttsProvider);
-          final showMini = tts.contentKey == chapter.id &&
-              (tts.status == TtsStatus.playing || tts.status == TtsStatus.paused);
+          final showMini =
+              tts.contentKey == chapter.id &&
+              (tts.status == TtsStatus.playing ||
+                  tts.status == TtsStatus.paused);
           return ColoredBox(
             color: readerBackground,
-            child: SafeArea(top: false, child: Column(mainAxisSize: MainAxisSize.min, children: [
-              ValueListenableBuilder<bool>(valueListenable: _showQuickActions,
-                builder: (context, visible, _) => AnimatedSize(
-                  duration: const Duration(milliseconds: 180),
-                  child: !visible ? const SizedBox.shrink() : Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-                    decoration: BoxDecoration(border: Border(top: BorderSide(color: readerTextColor.withAlpha(25)))),
-                    child: Row(children: [
-                      IconButton(tooltip: 'Chương trước', color: readerTextColor,
-                        onPressed: chapter.prevChapterId == null ? null : () => _goToPreviousChapter(chapter),
-                        icon: const Icon(Icons.chevron_left_rounded)),
-                      Expanded(child: TextButton.icon(
-                        style: TextButton.styleFrom(foregroundColor: readerTextColor),
-                        onPressed: () => _openChapterToc(chapter),
-                        icon: const Icon(Icons.format_list_bulleted_rounded, size: 20), label: const Text('Mục lục'))),
-                      IconButton(tooltip: 'Về đầu chương', color: readerTextColor,
-                        onPressed: _scrollToTop, icon: const Icon(Icons.vertical_align_top_rounded, size: 20)),
-                      IconButton(tooltip: 'Chương sau', color: readerTextColor,
-                        onPressed: chapter.nextChapterId == null ? null : () => _goToNextChapter(chapter),
-                        icon: const Icon(Icons.chevron_right_rounded)),
-                    ]),
+            child: SafeArea(
+              top: false,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  ValueListenableBuilder<bool>(
+                    valueListenable: _showQuickActions,
+                    builder: (context, visible, _) => AnimatedSize(
+                      duration: const Duration(milliseconds: 180),
+                      child: !visible
+                          ? const SizedBox.shrink()
+                          : Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 16,
+                                vertical: 4,
+                              ),
+                              decoration: BoxDecoration(
+                                border: Border(
+                                  top: BorderSide(
+                                    color: readerTextColor.withAlpha(25),
+                                  ),
+                                ),
+                              ),
+                              child: Row(
+                                children: [
+                                  IconButton(
+                                    tooltip: 'Chương trước',
+                                    color: readerTextColor,
+                                    onPressed: chapter.prevChapterId == null
+                                        ? null
+                                        : () => _goToPreviousChapter(chapter),
+                                    icon: const Icon(
+                                      Icons.chevron_left_rounded,
+                                    ),
+                                  ),
+                                  Expanded(
+                                    child: TextButton.icon(
+                                      style: TextButton.styleFrom(
+                                        foregroundColor: readerTextColor,
+                                      ),
+                                      onPressed: () => _openChapterToc(chapter),
+                                      icon: const Icon(
+                                        Icons.format_list_bulleted_rounded,
+                                        size: 20,
+                                      ),
+                                      label: const Text('Mục lục'),
+                                    ),
+                                  ),
+                                  IconButton(
+                                    tooltip: 'Về đầu chương',
+                                    color: readerTextColor,
+                                    onPressed: _scrollToTop,
+                                    icon: const Icon(
+                                      Icons.vertical_align_top_rounded,
+                                      size: 20,
+                                    ),
+                                  ),
+                                  IconButton(
+                                    tooltip: 'Chương sau',
+                                    color: readerTextColor,
+                                    onPressed: chapter.nextChapterId == null
+                                        ? null
+                                        : () => _goToNextChapter(chapter),
+                                    icon: const Icon(
+                                      Icons.chevron_right_rounded,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                    ),
                   ),
-                )),
-              if (showMini) Padding(
-                padding: const EdgeInsets.fromLTRB(12, 4, 12, 10),
-                child: TtsPlayerWidget(
-                  compact: true, content: chapter.content, contentKey: chapter.id,
-                  title: 'Chương ${chapter.number}: ${chapter.title}',
-                  nextChapterId: chapter.nextChapterId, chapterNumber: chapter.number,
-                  apiBaseUrl: AppConfig.baseUrl,
-                )),
-            ])),
+                  if (showMini)
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(12, 4, 12, 10),
+                      child: TtsPlayerWidget(
+                        compact: true,
+                        content: chapter.content,
+                        contentKey: chapter.id,
+                        title: 'Chương ${chapter.number}: ${chapter.title}',
+                        nextChapterId: chapter.nextChapterId,
+                        chapterNumber: chapter.number,
+                        apiBaseUrl: AppConfig.baseUrl,
+                      ),
+                    ),
+                ],
+              ),
+            ),
           );
         },
+      ),
       ),
     );
   }
@@ -1527,13 +1907,16 @@ class _TopBar extends StatelessWidget {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                          color: foregroundColor,
-                          fontWeight: FontWeight.w600,
-                        ),
+                      color: foregroundColor,
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
                 ),
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 6,
+                  ),
                   decoration: BoxDecoration(
                     color: foregroundColor.withAlpha(18),
                     borderRadius: BorderRadius.circular(999),
@@ -1541,9 +1924,9 @@ class _TopBar extends StatelessWidget {
                   child: Text(
                     progressText,
                     style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                          color: foregroundColor,
-                          fontWeight: FontWeight.w700,
-                        ),
+                      color: foregroundColor,
+                      fontWeight: FontWeight.w700,
+                    ),
                   ),
                 ),
                 const SizedBox(width: 4),
@@ -1597,10 +1980,10 @@ class _TabLabel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final textStyle = Theme.of(context).textTheme.labelLarge?.copyWith(
-          fontSize: compact ? 12.5 : 13.5,
-          fontWeight: FontWeight.w600,
-          letterSpacing: -0.1,
-        );
+      fontSize: compact ? 12.5 : 13.5,
+      fontWeight: FontWeight.w600,
+      letterSpacing: -0.1,
+    );
 
     return SizedBox(
       height: double.infinity,

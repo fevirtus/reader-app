@@ -39,6 +39,23 @@ class AuthNotifier extends StateNotifier<AuthState> {
 
   final Ref _ref;
   int _generation = 0;
+  Future<void> _storageWrites = Future.value();
+
+  Future<void> _persist(Future<void> Function(SecureStore) write) {
+    final store = _store;
+    final task = _storageWrites.then((_) => write(store));
+    _storageWrites = task.then<void>(
+      (_) {},
+      onError: (Object _, StackTrace _) {},
+    );
+    return task;
+  }
+
+  @override
+  void dispose() {
+    _generation++;
+    super.dispose();
+  }
 
   SecureStore get _store => _ref.read(secureStoreProvider);
 
@@ -70,27 +87,35 @@ class AuthNotifier extends StateNotifier<AuthState> {
 
   Future<void> _restore() async {
     final generation = _generation;
-    final token = await _store.getAccessToken();
-    if (token != null && token.isNotEmpty) {
-      final cached = await _store.getProfile();
-      if (cached != null) {
-        try {
-          final snapshot = jsonDecode(cached);
-          if (generation == _generation && snapshot['token'] == token) {
-            state = AuthAuthenticated(UserModel.fromJson(snapshot['user']));
-          }
-        } catch (_) {}
+    try {
+      final token = await _store.getAccessToken();
+      if (generation != _generation) return;
+      if (token != null && token.isNotEmpty) {
+        final cached = await _store.getProfile();
+        if (cached != null) {
+          try {
+            final snapshot = jsonDecode(cached);
+            if (generation == _generation && snapshot['token'] == token) {
+              state = AuthAuthenticated(UserModel.fromJson(snapshot['user']));
+            }
+          } catch (_) {}
+        }
+        if (generation == _generation) await _fetchProfile();
+      } else {
+        state = AuthUnauthenticated();
       }
-      if (generation == _generation) await _fetchProfile();
-    } else if (generation == _generation) {
-      state = AuthUnauthenticated();
+    } catch (_) {
+      if (generation == _generation && state is! AuthAuthenticated) {
+        state = AuthError('Chưa đọc được phiên đăng nhập. Vui lòng thử lại.');
+      }
     }
   }
 
   Future<void> _fetchProfile() async {
     final generation = _generation;
-    final token = await _store.getAccessToken();
+    String? token;
     try {
+      token = await _store.getAccessToken();
       final res = await _ref
           .read(apiClientProvider)
           .dio
@@ -99,17 +124,27 @@ class AuthNotifier extends StateNotifier<AuthState> {
         return;
       }
       final user = UserModel.fromJson(res.data as Map<String, dynamic>);
-      await _store.setProfile(
-        jsonEncode({'token': token, 'user': user.toJson()}),
-      );
+      await _persist((store) async {
+        if (generation == _generation) {
+          await store.setProfile(
+            jsonEncode({'token': token, 'user': user.toJson()}),
+          );
+        }
+      });
       if (generation == _generation) state = AuthAuthenticated(user);
     } on DioException catch (e) {
-      if (generation != _generation || token != await _store.getAccessToken()) {
+      if (generation != _generation) return;
+      try {
+        if (token != await _store.getAccessToken()) return;
+      } catch (_) {
         return;
       }
+      if (generation != _generation) return;
       if (e.response?.statusCode == 401) {
-        await _store.clear();
-        state = AuthUnauthenticated();
+        await _persist((store) async {
+          if (generation == _generation) await store.clear();
+        });
+        if (generation == _generation) state = AuthUnauthenticated();
       } else if (state is! AuthAuthenticated) {
         // Preserve credentials during transport/server failures.
         state = AuthUnauthenticated();
@@ -154,15 +189,17 @@ class AuthNotifier extends StateNotifier<AuthState> {
 
       final data = res.data as Map<String, dynamic>;
       if (generation != _generation) return;
-      await _store.setAccessToken(data['accessToken'] as String);
-      if (data['refreshToken'] != null) {
-        await _store.setRefreshToken(data['refreshToken'] as String);
-      }
-
       final user = UserModel.fromJson(data['user'] as Map<String, dynamic>);
-      await _store.setProfile(
-        jsonEncode({'token': data['accessToken'], 'user': user.toJson()}),
-      );
+      await _persist((store) async {
+        if (generation != _generation) return;
+        await store.setAccessToken(data['accessToken'] as String);
+        if (data['refreshToken'] != null) {
+          await store.setRefreshToken(data['refreshToken'] as String);
+        }
+        await store.setProfile(
+          jsonEncode({'token': data['accessToken'], 'user': user.toJson()}),
+        );
+      });
       if (generation == _generation) state = AuthAuthenticated(user);
     } on PlatformException catch (e, st) {
       if (generation != _generation) return;
@@ -203,7 +240,7 @@ class AuthNotifier extends StateNotifier<AuthState> {
   Future<void> signOut() async {
     ++_generation;
     state = AuthUnauthenticated();
-    await _store.clear();
+    await _persist((store) => store.clear());
     try {
       await _googleSignIn.signOut();
     } catch (_) {}
@@ -212,7 +249,7 @@ class AuthNotifier extends StateNotifier<AuthState> {
   Future<void> handleSessionExpired() async {
     ++_generation;
     state = AuthUnauthenticated();
-    await _store.clear();
+    await _persist((store) => store.clear());
   }
 }
 

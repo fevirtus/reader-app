@@ -1,5 +1,3 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -15,12 +13,13 @@ class SplashScreen extends ConsumerStatefulWidget {
 }
 
 class _SplashScreenState extends ConsumerState<SplashScreen> {
-  Timer? _redirectTimer;
-
   bool _isRestorableRoute(String path) {
     if (path.isEmpty || path == RouteNames.splash) return false;
-    // Composite "parentPath|deepPath" — validate the deep path portion
-    final checkPath = path.contains('|') ? path.substring(path.indexOf('|') + 1) : path;
+    if (path.contains('|')) {
+      final parts = path.split('|');
+      return parts.length == 2 && parts.every(_isRestorableRoute);
+    }
+    final checkPath = path;
     return checkPath == RouteNames.home ||
         checkPath == RouteNames.login ||
         checkPath == RouteNames.search ||
@@ -36,9 +35,14 @@ class _SplashScreenState extends ConsumerState<SplashScreen> {
   @override
   void initState() {
     super.initState();
-    _redirectTimer = Timer(const Duration(milliseconds: 700), () async {
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (!mounted) return;
-      final lastPath = await ref.read(localStoreProvider).loadLastRoutePath();
+      String? lastPath;
+      try {
+        lastPath = await ref.read(localStoreProvider).loadLastRoutePath();
+      } catch (_) {
+        // A failed preference read must not leave the app on the splash screen.
+      }
       if (!mounted) return;
       if (lastPath != null && _isRestorableRoute(lastPath)) {
         if (lastPath.contains('|')) {
@@ -57,12 +61,12 @@ class _SplashScreenState extends ConsumerState<SplashScreen> {
           });
         } else {
           // Single deep route (novel, comments) outside ShellRoute: push on Home
-          final isDeepRoute = lastPath.startsWith('/reader/') ||
-              lastPath.startsWith('/novel/');
+          final isDeepRoute =
+              lastPath.startsWith('/reader/') || lastPath.startsWith('/novel/');
           if (isDeepRoute) {
             context.go(RouteNames.home);
             WidgetsBinding.instance.addPostFrameCallback((_) {
-              if (mounted) context.push(lastPath);
+              if (mounted) context.push(lastPath!);
             });
           } else {
             context.go(lastPath);
@@ -72,12 +76,6 @@ class _SplashScreenState extends ConsumerState<SplashScreen> {
       }
       context.go(RouteNames.home);
     });
-  }
-
-  @override
-  void dispose() {
-    _redirectTimer?.cancel();
-    super.dispose();
   }
 
   @override

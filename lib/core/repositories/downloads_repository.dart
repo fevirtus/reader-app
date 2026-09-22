@@ -18,6 +18,7 @@ class DownloadsRepository {
   DownloadsRepository(this._db);
 
   final AppDatabase _db;
+  late final Future<void> ready = recoverStaleDownloads();
 
   Stream<List<Download>> watchAll() {
     final query = _db.select(_db.downloads)
@@ -30,18 +31,22 @@ class DownloadsRepository {
   Stream<List<DownloadWithNovel>> watchAllWithNovels() {
     final query = _db.select(_db.downloads).join([
       leftOuterJoin(_db.novels, _db.novels.id.equalsExp(_db.downloads.novelId)),
-    ])
-      ..orderBy([OrderingTerm.desc(_db.downloads.updatedAt)]);
-    return query.watch().map((rows) => rows
-        .map((r) => DownloadWithNovel(
+    ])..orderBy([OrderingTerm.desc(_db.downloads.updatedAt)]);
+    return query.watch().map(
+      (rows) => rows
+          .map(
+            (r) => DownloadWithNovel(
               download: r.readTable(_db.downloads),
               novel: r.readTableOrNull(_db.novels)?.toModel(),
-            ))
-        .toList());
+            ),
+          )
+          .toList(),
+    );
   }
 
   Stream<Download?> watchForNovel(String novelId) {
-    final query = _db.select(_db.downloads)..where((t) => t.novelId.equals(novelId));
+    final query = _db.select(_db.downloads)
+      ..where((t) => t.novelId.equals(novelId));
     return query.watchSingleOrNull();
   }
 
@@ -53,14 +58,21 @@ class DownloadsRepository {
     int? bytesSize,
     String? errorMessage,
   }) {
-    return _db.into(_db.downloads).insertOnConflictUpdate(
+    return _db
+        .into(_db.downloads)
+        .insertOnConflictUpdate(
           DownloadsCompanion.insert(
             novelId: novelId,
             status: status,
-            totalChapters: totalChapters == null ? const Value.absent() : Value(totalChapters),
-            downloadedChapters:
-                downloadedChapters == null ? const Value.absent() : Value(downloadedChapters),
-            bytesSize: bytesSize == null ? const Value.absent() : Value(bytesSize),
+            totalChapters: totalChapters == null
+                ? const Value.absent()
+                : Value(totalChapters),
+            downloadedChapters: downloadedChapters == null
+                ? const Value.absent()
+                : Value(downloadedChapters),
+            bytesSize: bytesSize == null
+                ? const Value.absent()
+                : Value(bytesSize),
             errorMessage: Value(errorMessage),
             updatedAt: Value(DateTime.now()),
           ),
@@ -68,7 +80,9 @@ class DownloadsRepository {
   }
 
   Future<void> delete(String novelId) {
-    return (_db.delete(_db.downloads)..where((t) => t.novelId.equals(novelId))).go();
+    return (_db.delete(
+      _db.downloads,
+    )..where((t) => t.novelId.equals(novelId))).go();
   }
 
   /// Gọi một lần khi app khởi động. Nếu app bị tắt (kill process, crash...)
@@ -78,14 +92,19 @@ class DownloadsRepository {
   /// thành "paused" để UI hiển thị đúng thực tế và người dùng có thể bấm
   /// tải lại thay vì thấy vòng xoay tải mãi mãi không tiến triển.
   Future<void> recoverStaleDownloads() async {
-    await (_db.update(_db.downloads)..where((t) => t.status.equals('downloading'))).write(
-      DownloadsCompanion(status: const Value('paused'), updatedAt: Value(DateTime.now())),
+    await (_db.update(
+      _db.downloads,
+    )..where((t) => t.status.equals('downloading'))).write(
+      DownloadsCompanion(
+        status: const Value('paused'),
+        updatedAt: Value(DateTime.now()),
+      ),
     );
   }
 }
 
 final downloadsRepositoryProvider = Provider<DownloadsRepository>((ref) {
   final repo = DownloadsRepository(ref.watch(appDatabaseProvider));
-  unawaited(repo.recoverStaleDownloads());
+  unawaited(repo.ready);
   return repo;
 });

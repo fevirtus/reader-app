@@ -1,5 +1,6 @@
 import '../../../core/repositories/chapters_repository.dart';
 import 'dart:async';
+import 'package:dio/dio.dart';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -88,6 +89,7 @@ class BrowseResult {
   final int totalPages;
   final int currentPage;
   final bool isLoadingMore;
+  final bool loadMoreFailed;
 
   const BrowseResult({
     required this.items,
@@ -95,6 +97,7 @@ class BrowseResult {
     required this.totalPages,
     required this.currentPage,
     this.isLoadingMore = false,
+    this.loadMoreFailed = false,
   });
 
   bool get hasMore => currentPage < totalPages;
@@ -105,6 +108,7 @@ class BrowseResult {
     int? totalPages,
     int? currentPage,
     bool? isLoadingMore,
+    bool? loadMoreFailed,
   }) {
     return BrowseResult(
       items: items ?? this.items,
@@ -112,6 +116,7 @@ class BrowseResult {
       totalPages: totalPages ?? this.totalPages,
       currentPage: currentPage ?? this.currentPage,
       isLoadingMore: isLoadingMore ?? this.isLoadingMore,
+      loadMoreFailed: loadMoreFailed ?? this.loadMoreFailed,
     );
   }
 }
@@ -119,19 +124,29 @@ class BrowseResult {
 class NovelsNotifier extends StateNotifier<AsyncValue<BrowseResult>> {
   final Ref _ref;
   BrowseParams _params = const BrowseParams();
-  bool _isLoadingMore = false;
+  int _generation = 0;
+  CancelToken? _request;
 
-  NovelsNotifier(this._ref) : super(const AsyncValue.loading()) {
-    fetch();
+  NovelsNotifier(this._ref) : super(const AsyncValue.loading());
+
+  @override
+  void dispose() {
+    _generation++;
+    _request?.cancel();
+    super.dispose();
   }
 
   BrowseParams get params => _params;
 
-  Future<BrowseResult> _fetchPage(BrowseParams params) async {
+  Future<BrowseResult> _fetchPage(
+    BrowseParams params,
+    CancelToken token,
+  ) async {
     final client = _ref.read(apiClientProvider);
     final res = await client.dio.get(
       '/api/novels/browse',
       queryParameters: params.toQueryParams(),
+      cancelToken: token,
     );
     final data = res.data as Map<String, dynamic>;
     return BrowseResult(
@@ -145,40 +160,52 @@ class NovelsNotifier extends StateNotifier<AsyncValue<BrowseResult>> {
   }
 
   Future<void> fetch({BrowseParams? params}) async {
-    if (params != null) _params = params;
+    final generation = ++_generation;
+    _request?.cancel();
+    final token = _request = CancelToken();
+    _params = (params ?? _params).copyWith(page: 1);
     state = const AsyncValue.loading();
     try {
-      final firstPageParams = _params.copyWith(page: 1);
-      final result = await _fetchPage(firstPageParams);
-      _params = firstPageParams;
-      state = AsyncValue.data(result);
+      final result = await _fetchPage(_params, token);
+      if (mounted && generation == _generation) state = AsyncValue.data(result);
     } catch (e, st) {
-      state = AsyncValue.error(e, st);
+      if (mounted && generation == _generation && !token.isCancelled) {
+        state = AsyncValue.error(e, st);
+      }
     }
   }
 
   Future<void> updateParams(BrowseParams params) => fetch(params: params);
 
-  Future<void> loadNextPage() async {
+  Future<void> loadNextPage({bool retry = false}) async {
     final current = state.valueOrNull;
-    if (current == null || !current.hasMore || _isLoadingMore) return;
-
-    _isLoadingMore = true;
-    state = AsyncValue.data(current.copyWith(isLoadingMore: true));
-
+    if (current == null ||
+        !current.hasMore ||
+        current.isLoadingMore ||
+        (current.loadMoreFailed && !retry)) {
+      return;
+    }
+    final generation = _generation;
+    final token = _request = CancelToken();
+    state = AsyncValue.data(
+      current.copyWith(isLoadingMore: true, loadMoreFailed: false),
+    );
     try {
       final nextParams = _params.copyWith(page: current.currentPage + 1);
-      final nextPage = await _fetchPage(nextParams);
-      _params = nextParams;
-
-      final merged = [...current.items, ...nextPage.items];
-      state = AsyncValue.data(
-        nextPage.copyWith(items: merged, isLoadingMore: false),
-      );
-    } catch (e, st) {
-      state = AsyncValue.error(e, st);
-    } finally {
-      _isLoadingMore = false;
+      final nextPage = await _fetchPage(nextParams, token);
+      if (!mounted || generation != _generation) return;
+      // A shifting feed can repeat a book across page boundaries.
+      final merged = {for (final item in current.items) item.id: item};
+      for (final item in nextPage.items) {
+        merged[item.id] = item;
+      }
+      state = AsyncValue.data(nextPage.copyWith(items: merged.values.toList()));
+    } catch (_) {
+      if (mounted && generation == _generation && !token.isCancelled) {
+        state = AsyncValue.data(
+          current.copyWith(isLoadingMore: false, loadMoreFailed: true),
+        );
+      }
     }
   }
 }
@@ -294,3 +321,18 @@ final chapterListProvider = StreamProvider.family<List<ChapterListItem>, String>
     if (cached.isEmpty) rethrow;
   }
 });
+
+/// Resolve progress against the visible snapshot, never an absent remote chapter.
+ChapterListItem? resolveReadingChapter(
+  List<ChapterListItem> chapters,
+  String? savedId,
+  int? savedNumber,
+) {
+  for (final chapter in chapters) {
+    if (chapter.id == savedId) return chapter;
+  }
+  for (final chapter in chapters) {
+    if (savedNumber != null && chapter.number == savedNumber) return chapter;
+  }
+  return null;
+}

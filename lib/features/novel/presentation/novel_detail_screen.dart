@@ -185,8 +185,9 @@ class _NovelDetailScreenState extends ConsumerState<NovelDetailScreen> {
             bookmark?.lastChapterNumber ??
             (progress?['chapterNumber'] as num?)?.toInt();
         final completed = bookmark?.isCompleted ?? false;
-        final hasProgress = savedId != null && savedId.isNotEmpty && !completed;
-        final target = hasProgress ? savedId : chapters.first.id;
+        final resume = resolveReadingChapter(chapters, savedId, savedNumber);
+        final hasProgress = resume != null && !completed;
+        final target = hasProgress ? resume.id : chapters.first.id;
         return Padding(
           padding: const EdgeInsets.symmetric(horizontal: 24),
           child: Row(
@@ -200,7 +201,7 @@ class _NovelDetailScreenState extends ConsumerState<NovelDetailScreen> {
                     completed
                         ? 'Đọc lại từ đầu'
                         : hasProgress
-                        ? 'Đọc tiếp · Chương ${savedNumber ?? "?"}'
+                        ? 'Đọc tiếp · Chương ${resume.number}'
                         : 'Bắt đầu đọc',
                   ),
                   style: FilledButton.styleFrom(

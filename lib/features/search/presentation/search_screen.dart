@@ -100,7 +100,9 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
         : incomingQuery;
     _selectedGenre = widget.initialGenre;
     _selectedStatus = widget.initialStatus;
-    _sort = widget.initialSort;
+    _sort = _sorts.any((s) => s.$2 == widget.initialSort)
+        ? widget.initialSort
+        : 'latest';
     if (applyImmediately) {
       if (mounted) {
         setState(() {});
@@ -116,6 +118,8 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
   }
 
   void _applyFilters() {
+    _debounce?.cancel();
+    if (_scrollController.hasClients) _scrollController.jumpTo(0);
     ref
         .read(novelsProvider.notifier)
         .updateParams(
@@ -310,6 +314,23 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
                       const SizedBox(height: AppSpacing.sm),
                   itemBuilder: (context, index) {
                     if (index >= result.items.length) {
+                      if (result.loadMoreFailed) {
+                        return Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 16),
+                          child: Column(
+                            children: [
+                              const Text('Chưa tải được các truyện tiếp theo'),
+                              TextButton.icon(
+                                onPressed: () => ref
+                                    .read(novelsProvider.notifier)
+                                    .loadNextPage(retry: true),
+                                icon: const Icon(Icons.refresh_rounded),
+                                label: const Text('Thử lại'),
+                              ),
+                            ],
+                          ),
+                        );
+                      }
                       if (result.isLoadingMore) {
                         return const Padding(
                           padding: EdgeInsets.symmetric(
@@ -437,7 +458,10 @@ class _NovelResultTile extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(height: AppSpacing.xs),
-                  Row(
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 6,
+                    crossAxisAlignment: WrapCrossAlignment.center,
                     children: [
                       StatusPill(
                         label: novel.status,
@@ -445,20 +469,25 @@ class _NovelResultTile extends StatelessWidget {
                             ? StatusPillTone.success
                             : StatusPillTone.neutral,
                       ),
-                      const SizedBox(width: AppSpacing.sm),
-                      if (novel.rating > 0) ...[
-                        Icon(
-                          Icons.star_rounded,
-                          size: 14,
-                          color: colorScheme.onSurfaceVariant,
+                      if (novel.rating > 0)
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              Icons.star_rounded,
+                              size: 14,
+                              color: colorScheme.onSurfaceVariant,
+                            ),
+                            const SizedBox(width: 3),
+                            Text(
+                              novel.rating.toStringAsFixed(1),
+                              style: Theme.of(context).textTheme.bodySmall
+                                  ?.copyWith(
+                                    color: colorScheme.onSurfaceVariant,
+                                  ),
+                            ),
+                          ],
                         ),
-                        const SizedBox(width: 2),
-                        Text(
-                          novel.rating.toStringAsFixed(1),
-                          style: Theme.of(context).textTheme.bodySmall
-                              ?.copyWith(color: colorScheme.onSurfaceVariant),
-                        ),
-                      ],
                     ],
                   ),
                 ],

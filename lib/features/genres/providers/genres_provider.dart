@@ -17,8 +17,12 @@ class GenresSyncNotifier extends StateNotifier<AsyncValue<void>> {
 
   final Ref _ref;
   bool _hasSyncedOnce = false;
+  Future<void>? _inFlight;
 
-  Future<void> refresh() async {
+  Future<void> refresh() =>
+      _inFlight ??= _refresh().whenComplete(() => _inFlight = null);
+
+  Future<void> _refresh() async {
     state = const AsyncValue.loading();
     try {
       final client = _ref.read(apiClientProvider);
@@ -28,21 +32,22 @@ class GenresSyncNotifier extends StateNotifier<AsyncValue<void>> {
           .toList();
       await _ref.read(genresRepositoryProvider).replaceAll(genres);
       _hasSyncedOnce = true;
-      state = const AsyncValue.data(null);
+      if (mounted) state = const AsyncValue.data(null);
     } catch (e, st) {
-      state = AsyncValue.error(e, st);
+      if (mounted) state = AsyncValue.error(e, st);
     }
   }
 
   Future<void> ensureSyncedIfOnline() async {
     if (_hasSyncedOnce) return;
     final online = await _ref.read(connectivityServiceProvider).checkIsOnline();
-    if (online) await refresh();
+    if (online && mounted && !_hasSyncedOnce) await refresh();
   }
 }
 
-final genresSyncProvider = StateNotifierProvider<GenresSyncNotifier, AsyncValue<void>>((ref) {
-  final notifier = GenresSyncNotifier(ref);
-  unawaited(notifier.ensureSyncedIfOnline());
-  return notifier;
-});
+final genresSyncProvider =
+    StateNotifierProvider<GenresSyncNotifier, AsyncValue<void>>((ref) {
+      final notifier = GenresSyncNotifier(ref);
+      unawaited(notifier.ensureSyncedIfOnline());
+      return notifier;
+    });
