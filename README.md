@@ -128,3 +128,26 @@ Các liên kết dưới đây giả định ba repo được checkout cạnh nh
 - [Backend và cách chạy](../reader-api/README.md)
 - [API contract hiện tại](../reader-api/CONTRACT.md)
 - [Đối chiếu tính năng web/mobile](../reader-api/CROSS_REPO_ENDPOINT_MATRIX.md)
+
+## Offline, đồng bộ và cập nhật bản tải
+
+- Nội dung và mục lục của truyện đã tải được đọc từ snapshot local.
+  Dùng **Tủ sách → Đã tải xuống → Cập nhật** để kiểm tra/tải bản mới.
+  Nếu tải lỗi hoặc server sửa nội dung giữa chừng, bản cũ vẫn đọc được.
+  Thử lại tái sử dụng các chương đã tải đúng checksum, không tải lại toàn bộ.
+- Tiến độ, đánh dấu đã đọc và xóa khỏi tủ sách được lưu theo tài khoản trong
+  SQLite cùng outbox. App gửi lại khi có mạng, mở lại app và định kỳ 30 giây
+  khi app đang hoạt động. Không yêu cầu đồng bộ nền khi hệ điều hành đã dừng app.
+- Không xóa thao tác chưa được API xác nhận. Khi API không truy cập được,
+  banner báo thay đổi chưa đồng bộ. Cần đăng nhập lại nếu token thực sự hết hạn;
+  lỗi mất mạng/5xx/403 không tự xóa phiên đăng nhập.
+- Đổi tài khoản không gửi thao tác của tài khoản cũ bằng token của tài khoản mới.
+  Bản tải là nội dung công khai dùng chung trên thiết bị; tiến độ/tủ sách tách riêng.
+- Nâng cấp database giữ nguyên các chương đã tải. Cache bookmark và progress
+  từ phiên bản cũ không có thông tin chủ tài khoản được giữ nguyên nhưng không
+  tự gán cho người đang đăng nhập; tủ sách mới sẽ được lấy từ API.
+- Đánh giá sao vẫn cần mạng. Settings đọc vẫn là thiết lập trên máy.
+- Quy tắc conflict và endpoint xem [API contract](../reader-api/CONTRACT.md).
+  Phải triển khai API mới trước app; với API cũ, outbox vẫn được giữ để thử lại.
+
+Kiểm thử offline: `flutter test test/offline_sync_test.dart`.

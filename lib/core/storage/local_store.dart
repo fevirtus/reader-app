@@ -1,8 +1,14 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../features/auth/providers/auth_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/reading_settings.dart';
+import 'offline_store.dart';
 
 class LocalStore {
+  LocalStore({this.owner = 'guest', this.store});
+  final OfflineStore? store;
+  final String owner;
+  static final Map<String, Future<void>> _writes = {};
   static const _kFontSize = 'reader_font_size';
   static const _kLineHeight = 'reader_line_height';
   static const _kLetterSpacing = 'reader_letter_spacing';
@@ -55,7 +61,8 @@ class LocalStore {
       letterSpacing: prefs.getDouble(_kLetterSpacing) ?? 0,
       fontFamily: prefs.getString(_kFontFamily) ?? 'serif',
       themePreset: themePreset,
-      backgroundColorValue: prefs.getInt(_kBackgroundColor) ?? fallbackBackground,
+      backgroundColorValue:
+          prefs.getInt(_kBackgroundColor) ?? fallbackBackground,
       textColorValue: prefs.getInt(_kTextColor) ?? fallbackText,
       horizontalPadding: prefs.getDouble(_kHorizontalPadding) ?? 20,
       paragraphSpacing: prefs.getDouble(_kParagraphSpacing) ?? 24,
@@ -70,21 +77,50 @@ class LocalStore {
     String chapterId,
     int chapterNumber,
     double offset,
-  ) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('$_kProgressChapterId$novelId', chapterId);
-    await prefs.setInt('$_kProgressChapterNum$novelId', chapterNumber);
-    await prefs.setDouble('$_kProgressOffset$novelId', offset);
+  ) {
+    if (store != null) {
+      return store!.write(owner, 'progress:$novelId', {
+        'chapterId': chapterId,
+        'chapterNumber': chapterNumber,
+        'scrollOffset': offset,
+      });
+    }
+    final key = '$owner:$novelId';
+    final task = (_writes[key] ?? Future<void>.value()).catchError((_) {}).then(
+      (_) async {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString(
+          '$_kProgressChapterId${owner}_$novelId',
+          chapterId,
+        );
+        await prefs.setInt(
+          '$_kProgressChapterNum${owner}_$novelId',
+          chapterNumber,
+        );
+        await prefs.setDouble('$_kProgressOffset${owner}_$novelId', offset);
+      },
+    );
+    _writes[key] = task;
+    return task.whenComplete(() {
+      if (identical(_writes[key], task)) _writes.remove(key);
+    });
   }
 
   Future<Map<String, dynamic>?> loadProgress(String novelId) async {
+    if (store != null) {
+      final data = await store!.read(owner, 'progress:$novelId');
+      return data == null ? null : Map<String, dynamic>.from(data);
+    }
+    await _writes['$owner:$novelId'];
     final prefs = await SharedPreferences.getInstance();
-    final chapterId = prefs.getString('$_kProgressChapterId$novelId');
+    final chapterId = prefs.getString('$_kProgressChapterId${owner}_$novelId');
     if (chapterId == null) return null;
     return {
       'chapterId': chapterId,
-      'chapterNumber': prefs.getInt('$_kProgressChapterNum$novelId') ?? 1,
-      'scrollOffset': prefs.getDouble('$_kProgressOffset$novelId') ?? 0.0,
+      'chapterNumber':
+          prefs.getInt('$_kProgressChapterNum${owner}_$novelId') ?? 1,
+      'scrollOffset':
+          prefs.getDouble('$_kProgressOffset${owner}_$novelId') ?? 0.0,
     };
   }
 
@@ -110,4 +146,9 @@ class LocalStore {
   }
 }
 
-final localStoreProvider = Provider<LocalStore>((_) => LocalStore());
+final localStoreProvider = Provider<LocalStore>(
+  (ref) => LocalStore(
+    owner: ref.watch(currentUserProvider)?.id ?? 'guest',
+    store: ref.watch(offlineStoreProvider),
+  ),
+);

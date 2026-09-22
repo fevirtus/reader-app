@@ -8,21 +8,25 @@ class ApiClient {
     required String baseUrl,
     required SecureStore secureStore,
     this.onSessionExpired,
-  })  : _secureStore = secureStore,
-        dio = Dio(
-          BaseOptions(
-            baseUrl: baseUrl,
-            connectTimeout: const Duration(seconds: 20),
-            receiveTimeout: const Duration(seconds: 20),
-            headers: const {'Content-Type': 'application/json'},
-          ),
-        ) {
+  }) : _secureStore = secureStore,
+       dio = Dio(
+         BaseOptions(
+           baseUrl: baseUrl,
+           connectTimeout: const Duration(seconds: 20),
+           receiveTimeout: const Duration(seconds: 20),
+           headers: const {'Content-Type': 'application/json'},
+         ),
+       ) {
     dio.interceptors.add(
       InterceptorsWrapper(
         onRequest: (options, handler) async {
-          debugPrint('[API] ${options.method} ${options.baseUrl}${options.path}');
+          debugPrint(
+            '[API] ${options.method} ${options.baseUrl}${options.path}',
+          );
           final token = await _secureStore.getAccessToken();
-          if (token != null && token.isNotEmpty) {
+          if (!options.headers.containsKey('Authorization') &&
+              token != null &&
+              token.isNotEmpty) {
             options.headers['Authorization'] = 'Bearer $token';
           }
           handler.next(options);
@@ -35,11 +39,16 @@ class ApiClient {
           );
           handler.next(response);
         },
-        onError: (error, handler) {
+        onError: (error, handler) async {
           final statusCode = error.response?.statusCode;
           final path = error.requestOptions.path;
 
-          if ((statusCode == 401 || statusCode == 403) && !_isAuthEndpoint(path)) {
+          final currentToken = await _secureStore.getAccessToken();
+          if (statusCode == 401 &&
+              !_isAuthEndpoint(path) &&
+              currentToken != null &&
+              error.requestOptions.headers['Authorization'] ==
+                  'Bearer $currentToken') {
             _handleSessionExpired();
           }
 
@@ -69,7 +78,6 @@ class ApiClient {
       return;
     }
     _lastSessionExpiredAt = now;
-    _secureStore.clear();
     onSessionExpired?.call();
   }
 }

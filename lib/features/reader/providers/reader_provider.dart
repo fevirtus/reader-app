@@ -6,13 +6,19 @@ import '../../../core/models/reading_settings.dart';
 import '../../../core/network/providers.dart';
 import '../../../core/repositories/chapters_repository.dart';
 import '../../../core/storage/local_store.dart';
-import '../../bookshelf/providers/bookshelf_provider.dart';
+import '../../auth/providers/auth_provider.dart';
+import '../../../core/sync/user_sync.dart';
 
 // ─── Chapter content ─────────────────────────────────────────────────────────
 
-final chapterProvider =
-    FutureProvider.family<ChapterModel, String>((ref, chapterId) async {
+final chapterProvider = FutureProvider.family<ChapterModel, String>((
+  ref,
+  chapterId,
+) async {
   final chaptersRepo = ref.read(chaptersRepositoryProvider);
+
+  final downloaded = await chaptersRepo.getDownloadedChapter(chapterId);
+  if (downloaded != null) return downloaded;
 
   // Try network first, fall back to cache/download đã lưu cục bộ
   try {
@@ -23,7 +29,9 @@ final chapterProvider =
     unawaited(chaptersRepo.cacheViewedChapter(chapter));
     return chapter;
   } catch (_) {
-    debugPrint('[READER][CHAPTER][ERROR] Failed to load chapterId=$chapterId from network, trying cache');
+    debugPrint(
+      '[READER][CHAPTER][ERROR] Failed to load chapterId=$chapterId from network, trying cache',
+    );
     final cached = await chaptersRepo.getCachedChapter(chapterId);
     if (cached != null) return cached;
     debugPrint('[READER][CHAPTER][ERROR] No cache for chapterId=$chapterId');
@@ -50,10 +58,12 @@ class ReadingProgress {
 class ReaderNotifier extends StateNotifier<ReadingProgress?> {
   final Ref _ref;
   String? _novelId;
+  String? _owner;
 
   ReaderNotifier(this._ref) : super(null);
 
   void open(String novelId, String chapterId, int chapterNumber) {
+    _owner = _ref.read(currentUserProvider)?.id;
     _novelId = novelId;
     state = ReadingProgress(
       novelId: novelId,
@@ -85,60 +95,38 @@ class ReaderNotifier extends StateNotifier<ReadingProgress?> {
       chapterNumber: state!.chapterNumber,
       scrollOffset: offset,
     );
-    _debounceUpdate(offset);
+    unawaited(_persistProgress(state!.chapterId, state!.chapterNumber, offset));
   }
 
   Future<void> _persistProgress(
-      String chapterId, int chapterNumber, double offset) async {
+    String chapterId,
+    int chapterNumber,
+    double offset,
+  ) async {
+    final occurredAt = DateTime.now();
+    final novelId = _novelId;
+    final owner = _owner;
+    if (novelId == null || owner != _ref.read(currentUserProvider)?.id) return;
     final localStore = _ref.read(localStoreProvider);
-    await localStore.saveProgress(_novelId!, chapterId, chapterNumber, offset);
-    // Also notify server (fire and forget)
-    try {
-      final client = _ref.read(apiClientProvider);
-      final res = await client.dio.post('/api/user/reading-progress', data: {
-        'novelId': _novelId,
+    final sync = _ref.read(userSyncProvider);
+    if (owner == null) {
+      await localStore.saveProgress(novelId, chapterId, chapterNumber, offset);
+    } else {
+      await sync.enqueue(owner, {
+        'kind': 'progress',
+        'novelId': novelId,
         'chapterId': chapterId,
         'chapterNumber': chapterNumber,
         'progress': offset,
-      });
-
-      final data = res.data;
-      Map<String, dynamic>? bookmarkJson;
-      if (data is Map<String, dynamic>) {
-        final bookmark = data['bookmark'];
-        if (bookmark is Map<String, dynamic>) {
-          bookmarkJson = bookmark;
-        }
-      }
-
-      _ref.read(bookshelfProvider.notifier).syncProgress(
-            novelId: _novelId!,
-            chapterId: chapterId,
-            chapterNumber: chapterNumber,
-            serverBookmark: bookmarkJson,
-          );
-    } catch (_) {}
+      }, occurredAt: occurredAt);
+    }
   }
 
-  Timer? _debounceTimer;
-  void _debounceUpdate(double offset) {
-    _debounceTimer?.cancel();
-    _debounceTimer = Timer(const Duration(seconds: 3), () {
-      if (state != null) {
-        unawaited(_persistProgress(state!.chapterId, state!.chapterNumber, offset));
-      }
-    });
-  }
-
-  @override
-  void dispose() {
-    _debounceTimer?.cancel();
-    super.dispose();
-  }
 }
 
-final readerProvider =
-    StateNotifierProvider<ReaderNotifier, ReadingProgress?>((ref) {
+final readerProvider = StateNotifierProvider<ReaderNotifier, ReadingProgress?>((
+  ref,
+) {
   return ReaderNotifier(ref);
 });
 
@@ -170,5 +158,5 @@ class ReadingSettingsNotifier extends StateNotifier<ReadingSettings> {
 
 final readingSettingsProvider =
     StateNotifierProvider<ReadingSettingsNotifier, ReadingSettings>((ref) {
-  return ReadingSettingsNotifier(ref);
-});
+      return ReadingSettingsNotifier(ref);
+    });

@@ -12,93 +12,104 @@ import 'app_database.dart';
 
 extension NovelModelMapping on NovelModel {
   NovelsCompanion toCompanion() => NovelsCompanion.insert(
-        id: id,
-        title: title,
-        slug: slug,
-        authorName: authorName,
-        status: status,
-        totalChapters: Value(totalChapters),
-        originalTitle: Value(originalTitle),
-        description: Value(description),
-        coverUrl: Value(coverUrl),
-        coverColor: Value(coverColor),
-        views: Value(views),
-        rating: Value(rating),
-        ratingCount: Value(ratingCount),
-        userRating: Value(userRating),
-        bookmarkCount: Value(bookmarkCount),
-        seriesId: Value(seriesId),
-        genresJson: Value(genres.isEmpty ? null : jsonEncode(genres.map((g) => g.toJson()).toList())),
-        seriesJson: Value(series == null ? null : jsonEncode(series!.toJson())),
-        latestChapterJson: Value(latestChapter == null ? null : jsonEncode(latestChapter!.toJson())),
-      );
+    id: id,
+    title: title,
+    slug: slug,
+    authorName: authorName,
+    status: status,
+    totalChapters: Value(totalChapters),
+    updatedAt: Value(updatedAt ?? DateTime.fromMillisecondsSinceEpoch(0)),
+    originalTitle: Value(originalTitle),
+    description: Value(description),
+    coverUrl: Value(coverUrl),
+    coverColor: Value(coverColor),
+    views: Value(views),
+    rating: Value(rating),
+    ratingCount: Value(ratingCount),
+    userRating: Value(userRating),
+    bookmarkCount: Value(bookmarkCount),
+    seriesId: Value(seriesId),
+    genresJson: Value(
+      genres.isEmpty
+          ? null
+          : jsonEncode(genres.map((g) => g.toJson()).toList()),
+    ),
+    seriesJson: Value(series == null ? null : jsonEncode(series!.toJson())),
+    latestChapterJson: Value(
+      latestChapter == null ? null : jsonEncode(latestChapter!.toJson()),
+    ),
+  );
 }
 
 extension NovelRowMapping on Novel {
   NovelModel toModel() => NovelModel(
-        id: id,
-        title: title,
-        slug: slug,
-        authorName: authorName,
-        status: status,
-        totalChapters: totalChapters,
-        originalTitle: originalTitle,
-        description: description,
-        coverUrl: coverUrl,
-        coverColor: coverColor,
-        views: views,
-        rating: rating,
-        ratingCount: ratingCount,
-        userRating: userRating,
-        bookmarkCount: bookmarkCount,
-        seriesId: seriesId,
-        genres: genresJson == null
-            ? const []
-            : (jsonDecode(genresJson!) as List)
-                .map((g) => GenreModel.fromJson(g as Map<String, dynamic>))
-                .toList(),
-        series: seriesJson == null
-            ? null
-            : SeriesModel.fromJson(jsonDecode(seriesJson!) as Map<String, dynamic>),
-        latestChapter: latestChapterJson == null
-            ? null
-            : LatestChapterInfo.fromJson(jsonDecode(latestChapterJson!) as Map<String, dynamic>),
-      );
+    id: id,
+    title: title,
+    slug: slug,
+    authorName: authorName,
+    status: status,
+    totalChapters: totalChapters,
+    updatedAt: updatedAt,
+    originalTitle: originalTitle,
+    description: description,
+    coverUrl: coverUrl,
+    coverColor: coverColor,
+    views: views,
+    rating: rating,
+    ratingCount: ratingCount,
+    // Ratings belong to an account; shared novel cache is not an authority for them.
+    userRating: null,
+    bookmarkCount: bookmarkCount,
+    seriesId: seriesId,
+    genres: genresJson == null
+        ? const []
+        : (jsonDecode(genresJson!) as List)
+              .map((g) => GenreModel.fromJson(g as Map<String, dynamic>))
+              .toList(),
+    series: seriesJson == null
+        ? null
+        : SeriesModel.fromJson(jsonDecode(seriesJson!) as Map<String, dynamic>),
+    latestChapter: latestChapterJson == null
+        ? null
+        : LatestChapterInfo.fromJson(
+            jsonDecode(latestChapterJson!) as Map<String, dynamic>,
+          ),
+  );
 }
 
 extension GenreModelMapping on GenreModel {
   GenresCompanion toCompanion() => GenresCompanion.insert(
-        id: id,
-        name: name,
-        slug: slug,
-        description: Value(description),
-        icon: Value(icon),
-        novelCount: Value(novelCount),
-      );
+    id: id,
+    name: name,
+    slug: slug,
+    description: Value(description),
+    icon: Value(icon),
+    novelCount: Value(novelCount),
+  );
 }
 
 extension GenreRowMapping on Genre {
   GenreModel toModel() => GenreModel(
-        id: id,
-        name: name,
-        slug: slug,
-        description: description,
-        icon: icon,
-        novelCount: novelCount,
-      );
+    id: id,
+    name: name,
+    slug: slug,
+    description: description,
+    icon: icon,
+    novelCount: novelCount,
+  );
 }
 
 extension BookmarkModelMapping on BookmarkModel {
   BookmarksCompanion toCompanion() => BookmarksCompanion.insert(
-        id: id,
-        novelId: novelId,
-        type: type.value,
-        shelfStatus: shelfStatus.value,
-        lastChapterId: Value(lastChapterId),
-        lastChapterNumber: Value(lastChapterNumber),
-        readChaptersJson: Value(jsonEncode(readChapters)),
-        markedAsRead: Value(markedAsRead),
-      );
+    id: id,
+    novelId: novelId,
+    type: type.value,
+    shelfStatus: shelfStatus.value,
+    lastChapterId: Value(lastChapterId),
+    lastChapterNumber: Value(lastChapterNumber),
+    readChaptersJson: Value(jsonEncode(readChapters)),
+    markedAsRead: Value(markedAsRead),
+  );
 }
 
 extension ChapterModelMapping on ChapterModel {
@@ -120,30 +131,32 @@ extension ChapterModelMapping on ChapterModel {
 
 extension ChapterContentRowMapping on ChapterContent {
   ChapterModel toModel() => ChapterModel(
-        id: chapterId,
-        novelId: novelId,
-        number: number,
-        title: title,
-        content: content,
-        prevChapterId: prevChapterId,
-        prevChapterNumber: prevChapterNumber,
-        nextChapterId: nextChapterId,
-        nextChapterNumber: nextChapterNumber,
-        volumeTitle: volumeTitle,
-        createdAt: cachedAt,
-      );
+    id: chapterId,
+    novelId: novelId,
+    number: number,
+    title: title,
+    content: content,
+    prevChapterId: prevChapterId,
+    prevChapterNumber: prevChapterNumber,
+    nextChapterId: nextChapterId,
+    nextChapterNumber: nextChapterNumber,
+    volumeTitle: volumeTitle,
+    createdAt: cachedAt,
+  );
 }
 
 extension BookmarkRowMapping on Bookmark {
   BookmarkModel toModel({NovelModel? novel}) => BookmarkModel(
-        id: id,
-        novelId: novelId,
-        type: BookmarkType.fromString(type),
-        shelfStatus: ShelfStatus.fromString(shelfStatus),
-        lastChapterId: lastChapterId,
-        lastChapterNumber: lastChapterNumber,
-        readChapters: (jsonDecode(readChaptersJson) as List).map((e) => (e as num).toInt()).toList(),
-        markedAsRead: markedAsRead,
-        novel: novel,
-      );
+    id: id,
+    novelId: novelId,
+    type: BookmarkType.fromString(type),
+    shelfStatus: ShelfStatus.fromString(shelfStatus),
+    lastChapterId: lastChapterId,
+    lastChapterNumber: lastChapterNumber,
+    readChapters: (jsonDecode(readChaptersJson) as List)
+        .map((e) => (e as num).toInt())
+        .toList(),
+    markedAsRead: markedAsRead,
+    novel: novel,
+  );
 }

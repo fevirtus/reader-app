@@ -55,21 +55,37 @@ class ChapterModel extends Equatable {
   final DateTime createdAt;
 
   factory ChapterModel.fromJson(Map<String, dynamic> json) => ChapterModel(
-        id: json['id'] as String,
-        novelId: json['novelId'] as String,
-      number: _toInt(json['number']),
-        title: json['title'] as String,
-        content: json['content'] as String,
-      views: _toInt(json['views']),
-      volumeNumber: _toNullableInt(json['volumeNumber']),
-        volumeTitle: json['volumeTitle'] as String?,
-      volumeChapterNumber: _toNullableInt(json['volumeChapterNumber']),
-        prevChapterId: json['prevChapterId'] as String?,
-      prevChapterNumber: _toNullableInt(json['prevChapterNumber']),
-        nextChapterId: json['nextChapterId'] as String?,
-      nextChapterNumber: _toNullableInt(json['nextChapterNumber']),
-      createdAt: _toDateTime(json['createdAt']),
-      );
+    id: json['id'] as String,
+    novelId: json['novelId'] as String,
+    number: _toInt(json['number']),
+    title: json['title'] as String,
+    content: json['content'] as String,
+    views: _toInt(json['views']),
+    volumeNumber: _toNullableInt(json['volumeNumber']),
+    volumeTitle: json['volumeTitle'] as String?,
+    volumeChapterNumber: _toNullableInt(json['volumeChapterNumber']),
+    prevChapterId: json['prevChapterId'] as String?,
+    prevChapterNumber: _toNullableInt(json['prevChapterNumber']),
+    nextChapterId: json['nextChapterId'] as String?,
+    nextChapterNumber: _toNullableInt(json['nextChapterNumber']),
+    createdAt: _toDateTime(json['createdAt']),
+  );
+
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'novelId': novelId,
+    'number': number,
+    'title': title,
+    'content': content,
+    'createdAt': createdAt.toIso8601String(),
+    'prevChapterId': prevChapterId,
+    'prevChapterNumber': prevChapterNumber,
+    'nextChapterId': nextChapterId,
+    'nextChapterNumber': nextChapterNumber,
+    'volumeNumber': volumeNumber,
+    'volumeTitle': volumeTitle,
+    'volumeChapterNumber': volumeChapterNumber,
+  };
 
   @override
   List<Object?> get props => [id, number];
@@ -94,14 +110,15 @@ class ChapterListItem extends Equatable {
   final int? volumeChapterNumber;
   final DateTime createdAt;
 
-  factory ChapterListItem.fromJson(Map<String, dynamic> json) => ChapterListItem(
+  factory ChapterListItem.fromJson(Map<String, dynamic> json) =>
+      ChapterListItem(
         id: json['id'] as String,
-      number: _toInt(json['number']),
+        number: _toInt(json['number']),
         title: json['title'] as String,
-      volumeNumber: _toNullableInt(json['volumeNumber']),
+        volumeNumber: _toNullableInt(json['volumeNumber']),
         volumeTitle: json['volumeTitle'] as String?,
-      volumeChapterNumber: _toNullableInt(json['volumeChapterNumber']),
-      createdAt: _toDateTime(json['createdAt']),
+        volumeChapterNumber: _toNullableInt(json['volumeChapterNumber']),
+        createdAt: _toDateTime(json['createdAt']),
       );
 
   @override

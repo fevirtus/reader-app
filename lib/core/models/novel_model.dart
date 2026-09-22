@@ -21,8 +21,14 @@ class NovelModel extends Equatable {
     this.seriesId,
     this.series,
     this.latestChapter,
+    this.updatedAt,
+    this.hasGenres = true,
+    this.hasSeries = true,
+    this.hasLatestChapter = true,
   });
 
+  final DateTime? updatedAt;
+  final bool hasGenres, hasSeries, hasLatestChapter;
   final String id;
   final String title;
   final String slug;
@@ -55,63 +61,77 @@ class NovelModel extends Equatable {
   }
 
   factory NovelModel.fromJson(Map<String, dynamic> json) => NovelModel(
-        id: _stringValue(json['id']),
-        title: _stringValue(json['title'], fallback: 'Không rõ tiêu đề'),
-        slug: _stringValue(json['slug']),
-        authorName: _stringValue(json['authorName'], fallback: 'Chưa rõ tác giả'),
-        status: _stringValue(json['status'], fallback: 'Đang ra'),
-        totalChapters: _intValue(json['totalChapters']),
-        originalTitle: json['originalTitle'] as String?,
-        description: json['description'] as String?,
-        coverUrl: json['coverUrl'] as String?,
-        coverColor: json['coverColor'] as String?,
-        views: (json['views'] as num?)?.toInt() ?? 0,
-        rating: (json['rating'] as num?)?.toDouble() ?? 0,
-        ratingCount: (json['ratingCount'] as num?)?.toInt() ?? 0,
-        userRating: (json['userRating'] as num?)?.toDouble(),
-        bookmarkCount: (json['bookmarkCount'] as num?)?.toInt() ?? 0,
-        genres: (json['genres'] as List<dynamic>?)
-                ?.map((g) => GenreModel.fromJson(g as Map<String, dynamic>))
-                .toList() ??
-            [],
-        seriesId: json['seriesId'] as String?,
-        series: json['series'] != null
-            ? SeriesModel.fromJson(json['series'] as Map<String, dynamic>)
-            : null,
-        latestChapter: json['latestChapter'] != null
-            ? LatestChapterInfo.fromJson(
-                json['latestChapter'] as Map<String, dynamic>)
-            : null,
-      );
+    updatedAt: DateTime.tryParse(json['updatedAt']?.toString() ?? ''),
+    hasGenres: json.containsKey('genres'),
+    hasSeries: json.containsKey('series'),
+    hasLatestChapter: json.containsKey('latestChapter'),
+    id: _stringValue(json['id']),
+    title: _stringValue(json['title'], fallback: 'Không rõ tiêu đề'),
+    slug: _stringValue(json['slug']),
+    authorName: _stringValue(json['authorName'], fallback: 'Chưa rõ tác giả'),
+    status: _stringValue(json['status'], fallback: 'Đang ra'),
+    totalChapters: _intValue(json['totalChapters']),
+    originalTitle: json['originalTitle'] as String?,
+    description: json['description'] as String?,
+    coverUrl: json['coverUrl'] as String?,
+    coverColor: json['coverColor'] as String?,
+    views: (json['views'] as num?)?.toInt() ?? 0,
+    rating: (json['rating'] as num?)?.toDouble() ?? 0,
+    ratingCount: (json['ratingCount'] as num?)?.toInt() ?? 0,
+    userRating: (json['userRating'] as num?)?.toDouble(),
+    bookmarkCount: (json['bookmarkCount'] as num?)?.toInt() ?? 0,
+    genres:
+        (json['genres'] as List<dynamic>?)
+            ?.map((g) => GenreModel.fromJson(g as Map<String, dynamic>))
+            .toList() ??
+        [],
+    seriesId: json['seriesId'] as String?,
+    series: json['series'] != null
+        ? SeriesModel.fromJson(json['series'] as Map<String, dynamic>)
+        : null,
+    latestChapter: json['latestChapter'] != null
+        ? LatestChapterInfo.fromJson(
+            json['latestChapter'] as Map<String, dynamic>,
+          )
+        : null,
+  );
 
   Map<String, dynamic> toJson() => {
-        'id': id,
-        'title': title,
-        'slug': slug,
-        'authorName': authorName,
-        'status': status,
-        'totalChapters': totalChapters,
-        'originalTitle': originalTitle,
-        'description': description,
-        'coverUrl': coverUrl,
-        'coverColor': coverColor,
-        'views': views,
-        'rating': rating,
-        'ratingCount': ratingCount,
-        'userRating': userRating,
-        'bookmarkCount': bookmarkCount,
-        'genres': genres.map((g) => g.toJson()).toList(),
-        'seriesId': seriesId,
-        'series': series?.toJson(),
-        'latestChapter': latestChapter?.toJson(),
-      };
+    'updatedAt': updatedAt?.toIso8601String(),
+    'id': id,
+    'title': title,
+    'slug': slug,
+    'authorName': authorName,
+    'status': status,
+    'totalChapters': totalChapters,
+    'originalTitle': originalTitle,
+    'description': description,
+    'coverUrl': coverUrl,
+    'coverColor': coverColor,
+    'views': views,
+    'rating': rating,
+    'ratingCount': ratingCount,
+    'userRating': userRating,
+    'bookmarkCount': bookmarkCount,
+    'genres': genres.map((g) => g.toJson()).toList(),
+    'seriesId': seriesId,
+    'series': series?.toJson(),
+    'latestChapter': latestChapter?.toJson(),
+  };
 
   @override
   List<Object?> get props => [id, slug];
 }
 
 class GenreModel extends Equatable {
-  const GenreModel({required this.id, required this.name, required this.slug, this.description, this.icon, this.novelCount = 0});
+  const GenreModel({
+    required this.id,
+    required this.name,
+    required this.slug,
+    this.description,
+    this.icon,
+    this.novelCount = 0,
+  });
   final String id;
   final String name;
   final String slug;
@@ -120,62 +140,73 @@ class GenreModel extends Equatable {
   final int novelCount;
 
   factory GenreModel.fromJson(Map<String, dynamic> json) => GenreModel(
-        id: json['id'] as String,
-        name: json['name'] as String,
-        slug: json['slug'] as String,
-        description: json['description'] as String?,
-        icon: json['icon'] as String?,
-        novelCount: (json['novelCount'] as num?)?.toInt() ?? 0,
-      );
+    id: json['id'] as String,
+    name: json['name'] as String,
+    slug: json['slug'] as String,
+    description: json['description'] as String?,
+    icon: json['icon'] as String?,
+    novelCount: (json['novelCount'] as num?)?.toInt() ?? 0,
+  );
 
   Map<String, dynamic> toJson() => {
-        'id': id,
-        'name': name,
-        'slug': slug,
-        'description': description,
-        'icon': icon,
-        'novelCount': novelCount,
-      };
+    'id': id,
+    'name': name,
+    'slug': slug,
+    'description': description,
+    'icon': icon,
+    'novelCount': novelCount,
+  };
 
   @override
   List<Object?> get props => [id, slug];
 }
 
 class SeriesModel extends Equatable {
-  const SeriesModel({required this.id, required this.name, required this.slug, this.novels = const []});
+  const SeriesModel({
+    required this.id,
+    required this.name,
+    required this.slug,
+    this.novels = const [],
+  });
   final String id;
   final String name;
   final String slug;
   final List<NovelModel> novels;
 
   factory SeriesModel.fromJson(Map<String, dynamic> json) => SeriesModel(
-        id: json['id'] as String,
-        name: json['name'] as String,
-        slug: json['slug'] as String,
-        novels: (json['novels'] as List<dynamic>?)
-                ?.map((n) => NovelModel.fromJson(n as Map<String, dynamic>))
-                .toList() ??
-            [],
-      );
+    id: json['id'] as String,
+    name: json['name'] as String,
+    slug: json['slug'] as String,
+    novels:
+        (json['novels'] as List<dynamic>?)
+            ?.map((n) => NovelModel.fromJson(n as Map<String, dynamic>))
+            .toList() ??
+        [],
+  );
 
   Map<String, dynamic> toJson() => {
-        'id': id,
-        'name': name,
-        'slug': slug,
-        'novels': novels.map((n) => n.toJson()).toList(),
-      };
+    'id': id,
+    'name': name,
+    'slug': slug,
+    'novels': novels.map((n) => n.toJson()).toList(),
+  };
 
   @override
   List<Object?> get props => [id, slug];
 }
 
 class LatestChapterInfo extends Equatable {
-  const LatestChapterInfo({required this.number, required this.title, required this.createdAt});
+  const LatestChapterInfo({
+    required this.number,
+    required this.title,
+    required this.createdAt,
+  });
   final int number;
   final String title;
   final DateTime createdAt;
 
-  factory LatestChapterInfo.fromJson(Map<String, dynamic> json) => LatestChapterInfo(
+  factory LatestChapterInfo.fromJson(Map<String, dynamic> json) =>
+      LatestChapterInfo(
         number: (json['number'] as num?)?.toInt() ?? 0,
         title: (json['title'] as String?) ?? '',
         createdAt: json['createdAt'] != null
@@ -184,10 +215,10 @@ class LatestChapterInfo extends Equatable {
       );
 
   Map<String, dynamic> toJson() => {
-        'number': number,
-        'title': title,
-        'createdAt': createdAt.toIso8601String(),
-      };
+    'number': number,
+    'title': title,
+    'createdAt': createdAt.toIso8601String(),
+  };
 
   @override
   List<Object?> get props => [number];

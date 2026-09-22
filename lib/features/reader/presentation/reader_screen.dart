@@ -456,8 +456,11 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
 
     final localStore = ref.read(localStoreProvider);
     final saved = await localStore.loadProgress(chapter.novelId);
-    if (!mounted || saved == null) return;
-    if (saved['chapterId'] != chapter.id) return;
+    if (!mounted) return;
+    if (saved == null || saved['chapterId'] != chapter.id) {
+      ref.read(readerProvider.notifier).resetCurrentChapterProgress();
+      return;
+    }
 
     final savedOffset = (saved['scrollOffset'] as num?)?.toDouble() ?? 0;
     if (savedOffset <= 0) return;

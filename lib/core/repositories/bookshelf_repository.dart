@@ -1,48 +1,66 @@
-import 'package:drift/drift.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-
 import '../models/bookmark_model.dart';
-import '../models/novel_model.dart';
-import '../storage/database/app_database.dart';
-import '../storage/database/mappers.dart';
+import '../storage/offline_store.dart';
+import 'novels_repository.dart';
+import '../../features/auth/providers/auth_provider.dart';
 
 class BookshelfRepository {
-  BookshelfRepository(this._db);
-
-  final AppDatabase _db;
+  BookshelfRepository(this.store, this.owner, this.novels);
+  final OfflineStore store;
+  final String owner;
+  final NovelsRepository novels;
 
   Future<List<BookmarkModel>> loadCached() async {
-    final query = _db.select(_db.bookmarks).join([
-      leftOuterJoin(_db.novels, _db.novels.id.equalsExp(_db.bookmarks.novelId)),
-    ]);
-    final rows = await query.get();
-    return rows.map((r) {
-      final bookmarkRow = r.readTable(_db.bookmarks);
-      final novelRow = r.readTableOrNull(_db.novels);
-      return bookmarkRow.toModel(novel: novelRow?.toModel());
-    }).toList();
+    final raw = await store.read(owner, 'bookshelf') as List? ?? [];
+    final books = {
+      for (final b in raw)
+        (b['novelId'] as String): BookmarkModel.fromJson(
+          Map<String, dynamic>.from(b),
+        ),
+    };
+    final pending = (await store.entries(owner, 'outbox:')).values.toList()
+      ..sort(
+        (a, b) =>
+            (a['occurredAt'] as String).compareTo(b['occurredAt'] as String),
+      );
+    for (final op in pending) {
+      final id = op['novelId'] as String;
+      if (op['kind'] == 'remove') {
+        books.remove(id);
+        continue;
+      }
+      final old =
+          books[id] ??
+          BookmarkModel(
+            id: 'local-$id',
+            novelId: id,
+            novel: await novels.getCachedNovel(id),
+          );
+      if (op['kind'] == 'progress') {
+        books[id] = old.copyWith(
+          lastChapterId: op['chapterId'],
+          lastChapterNumber: op['chapterNumber'],
+          readChapters: {
+            ...old.readChapters,
+            op['chapterNumber'] as int,
+          }.toList()..sort(),
+        );
+      } else if (op['kind'] == 'markAsRead') {
+        books[id] = old.copyWith(markedAsRead: true);
+      }
+    }
+    return books.values.toList();
   }
 
-  /// Ghi đè toàn bộ tủ sách cục bộ bằng danh sách mới nhất từ server.
-  Future<void> replaceAll(List<BookmarkModel> bookmarks) async {
-    await _db.transaction(() async {
-      final novels = bookmarks.map((b) => b.novel).whereType<NovelModel>().toList();
-      if (novels.isNotEmpty) {
-        await _db.batch((batch) {
-          batch.insertAllOnConflictUpdate(_db.novels, novels.map((n) => n.toCompanion()).toList());
-        });
-      }
-      await _db.delete(_db.bookmarks).go();
-      if (bookmarks.isNotEmpty) {
-        await _db.batch((batch) {
-          batch.insertAll(_db.bookmarks, bookmarks.map((b) => b.toCompanion()).toList());
-        });
-      }
-    });
-    await _db.touchSync('bookshelf');
+  Future<void> saveServer(List<dynamic> list) async {
+    await store.write(owner, 'bookshelf', list);
   }
 }
 
-final bookshelfRepositoryProvider = Provider<BookshelfRepository>((ref) {
-  return BookshelfRepository(ref.watch(appDatabaseProvider));
-});
+final bookshelfRepositoryProvider = Provider(
+  (ref) => BookshelfRepository(
+    ref.watch(offlineStoreProvider),
+    ref.watch(currentUserProvider)?.id ?? 'guest',
+    ref.watch(novelsRepositoryProvider),
+  ),
+);

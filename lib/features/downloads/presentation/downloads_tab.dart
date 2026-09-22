@@ -100,6 +100,12 @@ class _DownloadTile extends ConsumerWidget {
                   const SizedBox(height: 10),
                   Row(
                     children: [
+                      if (download.status != 'downloading')
+                        TextButton.icon(
+                          onPressed: () => actions.start(download.novelId),
+                          icon: const Icon(Icons.sync_rounded, size: 18),
+                          label: const Text('Cập nhật'),
+                        ),
                       if (download.status == 'downloading')
                         TextButton.icon(
                           onPressed: () => actions.cancel(download.novelId),

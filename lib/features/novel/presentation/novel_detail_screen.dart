@@ -1,3 +1,4 @@
+import '../../../core/sync/user_sync.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -20,7 +21,8 @@ import '../providers/novels_provider.dart';
 
 final novelReadProgressProvider =
     FutureProvider.family<Map<String, dynamic>?, String>((ref, novelId) async {
-      final localStore = ref.read(localStoreProvider);
+      ref.watch(syncRevisionProvider);
+      final localStore = ref.watch(localStoreProvider);
       return localStore.loadProgress(novelId);
     });
 

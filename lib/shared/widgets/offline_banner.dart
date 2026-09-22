@@ -1,3 +1,4 @@
+import '../../core/sync/user_sync.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -19,12 +20,19 @@ class OfflineBanner extends ConsumerWidget {
     // Mặc định coi là online khi chưa xác định được (tránh nháy banner lúc khởi động).
     final isOffline = isOnlineAsync.valueOrNull == false;
 
+    final syncError = ref.watch(syncErrorProvider);
     return Column(
       children: [
         AnimatedSize(
           duration: const Duration(milliseconds: 220),
           curve: Curves.easeOut,
-          child: isOffline ? const _OfflineBar() : const SizedBox.shrink(),
+          child: isOffline || syncError != null
+              ? _OfflineBar(
+                  message: isOffline
+                      ? 'Đang ngoại tuyến — hiển thị dữ liệu đã lưu'
+                      : syncError!,
+                )
+              : const SizedBox.shrink(),
         ),
         Expanded(child: child),
       ],
@@ -33,7 +41,8 @@ class OfflineBanner extends ConsumerWidget {
 }
 
 class _OfflineBar extends StatelessWidget {
-  const _OfflineBar();
+  const _OfflineBar({required this.message});
+  final String message;
 
   @override
   Widget build(BuildContext context) {
@@ -47,17 +56,24 @@ class _OfflineBar extends StatelessWidget {
         bottom: false,
         child: Container(
           decoration: BoxDecoration(
-            border: Border(bottom: BorderSide(color: theme.colorScheme.outlineVariant)),
+            border: Border(
+              bottom: BorderSide(color: theme.colorScheme.outlineVariant),
+            ),
           ),
-          padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg, vertical: AppSpacing.sm),
+          padding: const EdgeInsets.symmetric(
+            horizontal: AppSpacing.lg,
+            vertical: AppSpacing.sm,
+          ),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
               Icon(Icons.cloud_off_rounded, size: 15, color: warning),
               const SizedBox(width: AppSpacing.sm),
-              Text(
-                'Đang ngoại tuyến — hiển thị dữ liệu đã lưu',
-                style: theme.textTheme.labelMedium?.copyWith(color: warning),
+              Flexible(
+                child: Text(
+                  message,
+                  style: theme.textTheme.labelMedium?.copyWith(color: warning),
+                ),
               ),
             ],
           ),

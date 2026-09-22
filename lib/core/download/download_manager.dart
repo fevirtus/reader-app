@@ -1,146 +1,186 @@
-import 'package:flutter/foundation.dart';
+import 'dart:convert';
+import 'package:crypto/crypto.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-
 import '../models/chapter_model.dart';
+import '../models/novel_model.dart';
 import '../network/providers.dart';
 import '../repositories/chapters_repository.dart';
 import '../repositories/downloads_repository.dart';
+import '../repositories/novels_repository.dart';
+import '../storage/offline_store.dart';
+import '../../features/novel/providers/novels_provider.dart';
+import '../../features/reader/providers/reader_provider.dart';
 
-/// Tải toàn bộ chương của một truyện về máy để đọc ngoại tuyến, tuần tự từng
-/// chương một (tránh dội API), ghi tiến độ vào bảng `downloads` sau mỗi chương —
-/// UI theo dõi tiến độ qua [DownloadsRepository.watchForNovel] (phản ứng qua DB),
-/// không cần cơ chế thông báo riêng.
 class DownloadManager {
   DownloadManager(this._ref);
-
   final Ref _ref;
-  final Set<String> _cancelledNovelIds = {};
-  final Set<String> _activeNovelIds = {};
+  final Set<String> _cancelled = {};
+  final Map<String, Future<void>> _active = {};
+  bool isDownloading(String id) => _active.containsKey(id);
 
-  bool isDownloading(String novelId) => _activeNovelIds.contains(novelId);
-
-  Future<List<ChapterListItem>> _fetchAllChapterMeta(String novelId) async {
-    final client = _ref.read(apiClientProvider);
-    const limit = 500;
-    var page = 1;
-    var totalPages = 1;
-    final items = <ChapterListItem>[];
-
-    while (page <= totalPages) {
-      final res = await client.dio.get(
-        '/api/truyen/$novelId/chapters',
-        queryParameters: {'page': page, 'limit': limit},
-      );
-      final data = res.data as Map<String, dynamic>;
-      final chapters = data['chapters'] as List? ?? const [];
-      items.addAll(chapters.map((e) => ChapterListItem.fromJson(e as Map<String, dynamic>)));
-
-      final apiTotalPages = (data['totalPages'] as num?)?.toInt() ?? 1;
-      totalPages = apiTotalPages > 0 ? apiTotalPages : 1;
-      page += 1;
-    }
-
-    return items;
+  Future<Map<String, dynamic>> _manifest(String id) async {
+    final r = await _ref
+        .read(apiClientProvider)
+        .dio
+        .get('/api/novels/$id/download-manifest');
+    return Map<String, dynamic>.from(r.data);
   }
 
-  Future<void> startDownload(String novelId) async {
-    if (_activeNovelIds.contains(novelId)) return;
-    _activeNovelIds.add(novelId);
-    _cancelledNovelIds.remove(novelId);
+  Future<void> startDownload(String id) {
+    if (_active.containsKey(id)) return _active[id]!;
+    _cancelled.remove(id);
+    final task = _download(id);
+    _active[id] = task;
+    return task.whenComplete(() {
+      _active.remove(id);
+      _cancelled.remove(id);
+    });
+  }
 
-    final downloadsRepo = _ref.read(downloadsRepositoryProvider);
-    final chaptersRepo = _ref.read(chaptersRepositoryProvider);
-
+  Future<void> _download(String id) async {
+    final downloads = _ref.read(downloadsRepositoryProvider);
+    final chapters = _ref.read(chaptersRepositoryProvider);
+    final store = _ref.read(offlineStoreProvider);
+    final owner = 'download:$id';
+    int done = 0;
+    int total = 0;
     try {
-      List<ChapterListItem> chapters;
-      try {
-        chapters = await _fetchAllChapterMeta(novelId);
-      } catch (e) {
-        await downloadsRepo.upsert(
-          novelId: novelId,
-          status: 'failed',
-          errorMessage: 'Không tải được danh sách chương: $e',
-        );
-        return;
-      }
-
-      if (chapters.isEmpty) {
-        await downloadsRepo.upsert(
-          novelId: novelId,
-          status: 'failed',
-          errorMessage: 'Truyện chưa có chương nào',
-        );
-        return;
-      }
-
-      await downloadsRepo.upsert(
-        novelId: novelId,
+      final manifest = await _manifest(id);
+      final meta = List<Map<String, dynamic>>.from(
+        (manifest['chapters'] as List).map((e) => Map<String, dynamic>.from(e)),
+      );
+      total = meta.length;
+      if (total == 0) throw StateError('Truyện chưa có chương để tải');
+      if (_cancelled.contains(id)) return;
+      final novelResponse = await _ref
+          .read(apiClientProvider)
+          .dio
+          .get('/api/novels/$id');
+      await _ref
+          .read(novelsRepositoryProvider)
+          .saveNovelDetail(NovelModel.fromJson(novelResponse.data));
+      await downloads.upsert(
+        novelId: id,
         status: 'downloading',
-        totalChapters: chapters.length,
+        totalChapters: total,
         downloadedChapters: 0,
-        errorMessage: null,
       );
-
-      final client = _ref.read(apiClientProvider);
-      var done = 0;
-      for (final meta in chapters) {
-        if (_cancelledNovelIds.contains(novelId)) {
-          await downloadsRepo.upsert(
-            novelId: novelId,
+      for (final entry in meta) {
+        if (_cancelled.contains(id)) {
+          await downloads.upsert(
+            novelId: id,
             status: 'paused',
-            totalChapters: chapters.length,
+            totalChapters: total,
             downloadedChapters: done,
           );
           return;
         }
-
-        try {
-          final res = await client.dio.get('/api/chapters/${meta.id}');
-          final chapter = ChapterModel.fromJson(res.data as Map<String, dynamic>);
-          await chaptersRepo.saveDownloadedChapter(chapter);
-          done += 1;
-          await downloadsRepo.upsert(
-            novelId: novelId,
-            status: 'downloading',
-            totalChapters: chapters.length,
-            downloadedChapters: done,
+        final chapterId = entry['id'] as String;
+        final hash = entry['contentHash'] as String?;
+        if (hash == null || hash.isEmpty) {
+          throw StateError(
+            'Chương chưa có phiên bản nội dung, hãy thử lại sau',
           );
-        } catch (e) {
-          debugPrint('[DOWNLOAD][ERROR] novel=$novelId chapter=${meta.id} $e');
-          await downloadsRepo.upsert(
-            novelId: novelId,
-            status: 'failed',
-            totalChapters: chapters.length,
-            downloadedChapters: done,
-            errorMessage: 'Lỗi tải chương ${meta.number}: $e',
-          );
+        }
+        var saved = await store.read(owner, chapterId);
+        // Reuse intact staged or downloaded content; fetch only missing/changed chapters.
+        if (saved == null || saved['contentHash'] != hash) {
+          final local = await chapters.getDownloadedChapter(chapterId);
+          if (local != null &&
+              sha256.convert(utf8.encode(local.content)).toString() == hash) {
+            saved = {...local.toJson(), 'contentHash': hash};
+          } else {
+            final r = await _ref
+                .read(apiClientProvider)
+                .dio
+                .get('/api/chapters/$chapterId');
+            final c = ChapterModel.fromJson(Map<String, dynamic>.from(r.data));
+            if (c.novelId != id ||
+                sha256.convert(utf8.encode(c.content)).toString() != hash) {
+              throw StateError(
+                'Nội dung vừa thay đổi trên server. Bản cũ được giữ nguyên; hãy thử cập nhật lại',
+              );
+            }
+            saved = {...c.toJson(), 'contentHash': hash};
+          }
+        }
+        if (_cancelled.contains(id)) {
+          await downloads.upsert(novelId: id, status: 'paused');
           return;
         }
+        saved = Map<String, dynamic>.from(saved)
+          ..['title'] = entry['title']
+          ..['number'] = entry['number'];
+        await store.write(owner, chapterId, saved);
+        done++;
+        await downloads.upsert(
+          novelId: id,
+          status: 'downloading',
+          totalChapters: total,
+          downloadedChapters: done,
+        );
       }
-
-      final bytes = await chaptersRepo.getDownloadedSizeBytes(novelId);
-      await downloadsRepo.upsert(
-        novelId: novelId,
-        status: 'done',
-        totalChapters: chapters.length,
+      final latest = await _manifest(id);
+      if (latest['revision'] != manifest['revision']) {
+        throw StateError(
+          'Danh sách/nội dung chương đã đổi trong lúc tải. Bản cũ vẫn được giữ; hãy thử lại',
+        );
+      }
+      if (_cancelled.contains(id)) {
+        await downloads.upsert(novelId: id, status: 'paused');
+        return;
+      }
+      await store.db.transaction(() async {
+        // Commit contents, navigation and status together; no half-updated download.
+        await chapters.replaceDownloadFrom(
+          id,
+          meta,
+          (chapterId) async => ChapterModel.fromJson(
+            Map<String, dynamic>.from(await store.read(owner, chapterId)),
+          ),
+        );
+        await downloads.upsert(
+          novelId: id,
+          status: 'done',
+          totalChapters: total,
+          downloadedChapters: total,
+          bytesSize: await chapters.getDownloadedSizeBytes(id),
+        );
+        for (final key in (await store.entries(owner, '')).keys) {
+          await store.remove(owner, key);
+        }
+      });
+      _ref.invalidate(chapterListProvider(id));
+      for (final entry in meta) {
+        _ref.invalidate(chapterProvider(entry['id'] as String));
+      }
+    } catch (e) {
+      await downloads.upsert(
+        novelId: id,
+        status: _cancelled.contains(id) ? 'paused' : 'failed',
+        totalChapters: total == 0 ? null : total,
         downloadedChapters: done,
-        bytesSize: bytes,
+        errorMessage: 'Không cập nhật được. Bản tải cũ vẫn còn. $e',
       );
-    } finally {
-      _activeNovelIds.remove(novelId);
-      _cancelledNovelIds.remove(novelId);
     }
   }
 
-  void cancelDownload(String novelId) {
-    _cancelledNovelIds.add(novelId);
-  }
+  void cancelDownload(String id) => _cancelled.add(id);
 
-  Future<void> deleteDownload(String novelId) async {
-    cancelDownload(novelId);
-    await _ref.read(chaptersRepositoryProvider).deleteNovelChapters(novelId);
-    await _ref.read(downloadsRepositoryProvider).delete(novelId);
+  Future<void> deleteDownload(String id) async {
+    cancelDownload(id);
+    // Wait for in-flight requests/transaction before deleting; nothing can resurrect it.
+    await _active[id];
+    final store = _ref.read(offlineStoreProvider);
+    await store.db.transaction(() async {
+      await _ref.read(chaptersRepositoryProvider).deleteNovelChapters(id);
+      await _ref.read(downloadsRepositoryProvider).delete(id);
+      for (final key in (await store.entries('download:$id', '')).keys) {
+        await store.remove('download:$id', key);
+      }
+    });
+    _ref.invalidate(chapterListProvider(id));
   }
 }
 
-final downloadManagerProvider = Provider<DownloadManager>((ref) => DownloadManager(ref));
+final downloadManagerProvider = Provider((ref) => DownloadManager(ref));

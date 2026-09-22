@@ -21,18 +21,35 @@ class NovelsRepository {
     if (list.isEmpty) return;
     await _db.transaction(() async {
       for (final novel in list) {
-        final existing = await (_db.select(_db.novels)..where((t) => t.id.equals(novel.id)))
-            .getSingleOrNull();
+        final existing = await (_db.select(
+          _db.novels,
+        )..where((t) => t.id.equals(novel.id))).getSingleOrNull();
+        final sourceVersion = await _db.lastSyncedAt('novel-version:${novel.id}');
+        if (sourceVersion != null && novel.updatedAt != null && novel.updatedAt!.isBefore(sourceVersion)) {
+          continue;
+        }
         var companion = novel.toCompanion();
         if (existing != null) {
           companion = companion.copyWith(
-            genresJson: novel.genres.isEmpty ? Value(existing.genresJson) : companion.genresJson,
-            seriesJson: novel.series == null ? Value(existing.seriesJson) : companion.seriesJson,
-            latestChapterJson:
-                novel.latestChapter == null ? Value(existing.latestChapterJson) : companion.latestChapterJson,
+            updatedAt: novel.updatedAt == null
+                ? Value(existing.updatedAt)
+                : companion.updatedAt,
+            genresJson: !novel.hasGenres
+                ? Value(existing.genresJson)
+                : companion.genresJson,
+            seriesJson: !novel.hasSeries
+                ? Value(existing.seriesJson)
+                : companion.seriesJson,
+            latestChapterJson: !novel.hasLatestChapter
+                ? Value(existing.latestChapterJson)
+                : companion.latestChapterJson,
           );
         }
         await _db.into(_db.novels).insertOnConflictUpdate(companion);
+        if (novel.updatedAt != null) {
+          await _db.into(_db.syncMeta).insertOnConflictUpdate(
+            SyncMetaCompanion.insert(key: 'novel-version:${novel.id}', lastSyncedAt: novel.updatedAt!));
+        }
       }
     });
   }
@@ -41,12 +58,18 @@ class NovelsRepository {
   Future<void> saveHomeFeed(String section, List<NovelModel> novels) async {
     await _db.transaction(() async {
       await upsertNovels(novels);
-      await (_db.delete(_db.homeFeedItems)..where((t) => t.section.equals(section))).go();
+      await (_db.delete(
+        _db.homeFeedItems,
+      )..where((t) => t.section.equals(section))).go();
       if (novels.isNotEmpty) {
         await _db.batch((batch) {
           batch.insertAll(_db.homeFeedItems, [
             for (var i = 0; i < novels.length; i++)
-              HomeFeedItemsCompanion.insert(section: section, position: i, novelId: novels[i].id),
+              HomeFeedItemsCompanion.insert(
+                section: section,
+                position: i,
+                novelId: novels[i].id,
+              ),
           ]);
         });
       }
@@ -55,12 +78,18 @@ class NovelsRepository {
   }
 
   Stream<List<NovelModel>> watchHomeFeed(String section) {
-    final query = _db.select(_db.homeFeedItems).join([
-      innerJoin(_db.novels, _db.novels.id.equalsExp(_db.homeFeedItems.novelId)),
-    ])
-      ..where(_db.homeFeedItems.section.equals(section))
-      ..orderBy([OrderingTerm.asc(_db.homeFeedItems.position)]);
-    return query.watch().map((rows) => rows.map((r) => r.readTable(_db.novels).toModel()).toList());
+    final query =
+        _db.select(_db.homeFeedItems).join([
+            innerJoin(
+              _db.novels,
+              _db.novels.id.equalsExp(_db.homeFeedItems.novelId),
+            ),
+          ])
+          ..where(_db.homeFeedItems.section.equals(section))
+          ..orderBy([OrderingTerm.asc(_db.homeFeedItems.position)]);
+    return query.watch().map(
+      (rows) => rows.map((r) => r.readTable(_db.novels).toModel()).toList(),
+    );
   }
 
   Future<void> saveNovelDetail(NovelModel novel) => upsertNovels([novel]);

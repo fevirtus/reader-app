@@ -1,3 +1,8 @@
+import '../core/connectivity/connectivity_service.dart';
+import '../core/sync/user_sync.dart';
+import '../features/bookshelf/providers/bookshelf_provider.dart';
+import '../features/home/providers/home_provider.dart';
+import '../features/genres/providers/genres_provider.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -21,11 +26,47 @@ class ReaderApp extends ConsumerStatefulWidget {
   ConsumerState<ReaderApp> createState() => _ReaderAppState();
 }
 
-class _ReaderAppState extends ConsumerState<ReaderApp> {
+class _ReaderAppState extends ConsumerState<ReaderApp>
+    with WidgetsBindingObserver {
   final _scaffoldMessengerKey = GlobalKey<ScaffoldMessengerState>();
   ProviderSubscription<int>? _sessionExpirySub;
   late final GoRouter _router;
   String? _previousPath;
+  Timer? _syncTimer;
+  ProviderSubscription<AsyncValue<bool>>? _networkSub;
+  ProviderSubscription<AuthState>? _authSub;
+  bool _syncing = false;
+
+  Future<void> _syncOnline({bool refresh = false}) async {
+    if (_syncing || !mounted) return;
+    _syncing = true;
+    try {
+      if (!await ref.read(connectivityServiceProvider).checkIsOnline()) return;
+      if (!mounted) return;
+      await ref.read(authProvider.notifier).refreshSession();
+      if (!mounted) return;
+      await ref.read(userSyncProvider).flush();
+      if (!mounted) return;
+      await ref.read(bookshelfProvider.notifier).fetch();
+      if (refresh && mounted) {
+        await Future.wait([
+          ref.read(homeSyncProvider.notifier).refresh(),
+          ref.read(genresSyncProvider.notifier).refresh(),
+        ]);
+      }
+    } catch (_) {
+      // All unacknowledged edits remain in the outbox for the next retry.
+    } finally {
+      _syncing = false;
+    }
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      unawaited(_syncOnline(refresh: true));
+    }
+  }
 
   void _persistRouteForRestore() {
     if (!mounted) return;
@@ -51,34 +92,50 @@ class _ReaderAppState extends ConsumerState<ReaderApp> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _networkSub = ref.listenManual(isOnlineProvider, (previous, next) {
+      if (next.valueOrNull == true && previous?.valueOrNull != true) {
+        unawaited(_syncOnline(refresh: true));
+      }
+    });
+    _authSub = ref.listenManual(authProvider, (_, next) {
+      ref.read(syncErrorProvider.notifier).state = null;
+      if (next is AuthAuthenticated) unawaited(_syncOnline());
+    });
+    _syncTimer = Timer.periodic(
+      const Duration(seconds: 30),
+      (_) => unawaited(_syncOnline()),
+    );
     _router = ref.read(appRouterProvider);
     _router.routerDelegate.addListener(_persistRouteForRestore);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _ensureMandatoryTtsRequirements();
     });
 
-    _sessionExpirySub = ref.listenManual<int>(
-      sessionExpiryProvider,
-      (previous, next) async {
-        if (previous == null || next == previous) return;
+    _sessionExpirySub = ref.listenManual<int>(sessionExpiryProvider, (
+      previous,
+      next,
+    ) async {
+      if (previous == null || next == previous) return;
 
-        await ref.read(authProvider.notifier).handleSessionExpired();
+      await ref.read(authProvider.notifier).handleSessionExpired();
 
-        if (!mounted) return;
-        final router = ref.read(appRouterProvider);
-        if (router.state.uri.path != RouteNames.login) {
-          router.go(RouteNames.login);
-        }
+      if (!mounted) return;
+      final router = ref.read(appRouterProvider);
+      if (router.state.uri.path != RouteNames.login) {
+        router.go(RouteNames.login);
+      }
 
-        _scaffoldMessengerKey.currentState
-          ?..hideCurrentSnackBar()
-          ..showSnackBar(
-            const SnackBar(
-              content: Text('Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.'),
+      _scaffoldMessengerKey.currentState
+        ?..hideCurrentSnackBar()
+        ..showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.',
             ),
-          );
-      },
-    );
+          ),
+        );
+    });
   }
 
   Future<void> _ensureMandatoryTtsRequirements() async {
@@ -122,6 +179,10 @@ class _ReaderAppState extends ConsumerState<ReaderApp> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _syncTimer?.cancel();
+    _networkSub?.close();
+    _authSub?.close();
     _router.routerDelegate.removeListener(_persistRouteForRestore);
     _sessionExpirySub?.close();
     super.dispose();
@@ -139,7 +200,8 @@ class _ReaderAppState extends ConsumerState<ReaderApp> {
       darkTheme: AppTheme.darkTheme,
       themeMode: ThemeMode.system,
       routerConfig: router,
-      builder: (context, child) => OfflineBanner(child: child ?? const SizedBox.shrink()),
+      builder: (context, child) =>
+          OfflineBanner(child: child ?? const SizedBox.shrink()),
     );
   }
 }

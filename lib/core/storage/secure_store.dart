@@ -18,5 +18,9 @@ class SecureStore {
 
   Future<String?> getRefreshToken() => _storage.read(key: _kRefreshToken);
 
+  Future<void> setProfile(String json) =>
+      _storage.write(key: 'profile', value: json);
+  Future<String?> getProfile() => _storage.read(key: 'profile');
+
   Future<void> clear() => _storage.deleteAll();
 }

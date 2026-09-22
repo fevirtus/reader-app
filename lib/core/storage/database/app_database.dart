@@ -127,7 +127,8 @@ class Downloads extends Table {
   // queued | downloading | done | failed | paused
   TextColumn get status => text()();
   IntColumn get totalChapters => integer().withDefault(const Constant(0))();
-  IntColumn get downloadedChapters => integer().withDefault(const Constant(0))();
+  IntColumn get downloadedChapters =>
+      integer().withDefault(const Constant(0))();
   IntColumn get bytesSize => integer().withDefault(const Constant(0))();
   TextColumn get errorMessage => text().nullable()();
   DateTimeColumn get updatedAt => dateTime().withDefault(currentDateAndTime)();
@@ -163,7 +164,26 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase([QueryExecutor? executor]) : super(executor ?? _openConnection());
 
   @override
-  int get schemaVersion => 1;
+  int get schemaVersion => 2;
+
+  @override
+  MigrationStrategy get migration => MigrationStrategy(
+    onCreate: (m) async {
+      await m.createAll();
+      await _createOfflineStore();
+    },
+    onUpgrade: (m, from, to) async {
+      if (from < 2) {
+        await _createOfflineStore();
+        // Keep legacy unscoped data intact; new repositories never expose it as another account.
+      }
+    },
+  );
+
+  Future<void> _createOfflineStore() => customStatement(
+    'CREATE TABLE IF NOT EXISTS offline_store (owner TEXT NOT NULL, '
+    'key TEXT NOT NULL, value TEXT NOT NULL, PRIMARY KEY(owner, key))',
+  );
 
   /// Ghi lại thời điểm đồng bộ thành công cho một vùng dữ liệu.
   Future<void> touchSync(String key) {
@@ -173,8 +193,9 @@ class AppDatabase extends _$AppDatabase {
   }
 
   Future<DateTime?> lastSyncedAt(String key) async {
-    final row = await (select(syncMeta)..where((t) => t.key.equals(key)))
-        .getSingleOrNull();
+    final row = await (select(
+      syncMeta,
+    )..where((t) => t.key.equals(key))).getSingleOrNull();
     return row?.lastSyncedAt;
   }
 }
@@ -186,9 +207,12 @@ QueryExecutor _openConnection() {
     if (Platform.isAndroid) {
       await applyWorkaroundToOpenSqlite3OnOldAndroidVersions();
     }
-    return NativeDatabase.createInBackground(file, setup: (rawDb) {
-      rawDb.execute('PRAGMA foreign_keys = ON;');
-    });
+    return NativeDatabase.createInBackground(
+      file,
+      setup: (rawDb) {
+        rawDb.execute('PRAGMA foreign_keys = ON;');
+      },
+    );
   });
 }
 

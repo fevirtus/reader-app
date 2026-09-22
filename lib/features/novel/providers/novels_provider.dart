@@ -1,3 +1,4 @@
+import '../../../core/repositories/chapters_repository.dart';
 import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -55,13 +56,13 @@ class BrowseParams {
   }
 
   Map<String, dynamic> toQueryParams() => {
-        if (query != null && query!.isNotEmpty) 'q': query,
-        if (genre != null) 'genre': genre,
-        if (_normalizedStatus() != null) 'status': _normalizedStatus(),
-        'sort': _normalizedSort(),
-        'page': page.toString(),
-        'limit': '20',
-      };
+    if (query != null && query!.isNotEmpty) 'q': query,
+    if (genre != null) 'genre': genre,
+    if (_normalizedStatus() != null) 'status': _normalizedStatus(),
+    'sort': _normalizedSort(),
+    'page': page.toString(),
+    'limit': '20',
+  };
 
   BrowseParams copyWith({
     String? query,
@@ -72,14 +73,13 @@ class BrowseParams {
     bool clearQuery = false,
     bool clearGenre = false,
     bool clearStatus = false,
-  }) =>
-      BrowseParams(
-        query: clearQuery ? null : query ?? this.query,
-        genre: clearGenre ? null : genre ?? this.genre,
-        status: clearStatus ? null : status ?? this.status,
-        sort: sort ?? this.sort,
-        page: page ?? this.page,
-      );
+  }) => BrowseParams(
+    query: clearQuery ? null : query ?? this.query,
+    genre: clearGenre ? null : genre ?? this.genre,
+    status: clearStatus ? null : status ?? this.status,
+    sort: sort ?? this.sort,
+    page: page ?? this.page,
+  );
 }
 
 class BrowseResult {
@@ -129,10 +129,15 @@ class NovelsNotifier extends StateNotifier<AsyncValue<BrowseResult>> {
 
   Future<BrowseResult> _fetchPage(BrowseParams params) async {
     final client = _ref.read(apiClientProvider);
-    final res = await client.dio.get('/api/novels/browse', queryParameters: params.toQueryParams());
+    final res = await client.dio.get(
+      '/api/novels/browse',
+      queryParameters: params.toQueryParams(),
+    );
     final data = res.data as Map<String, dynamic>;
     return BrowseResult(
-      items: (data['items'] as List).map((e) => NovelModel.fromJson(e as Map<String, dynamic>)).toList(),
+      items: (data['items'] as List)
+          .map((e) => NovelModel.fromJson(e as Map<String, dynamic>))
+          .toList(),
       totalCount: (data['totalCount'] as num?)?.toInt() ?? 0,
       totalPages: (data['totalPages'] as num?)?.toInt() ?? 1,
       currentPage: (data['currentPage'] as num?)?.toInt() ?? params.page,
@@ -167,7 +172,9 @@ class NovelsNotifier extends StateNotifier<AsyncValue<BrowseResult>> {
       _params = nextParams;
 
       final merged = [...current.items, ...nextPage.items];
-      state = AsyncValue.data(nextPage.copyWith(items: merged, isLoadingMore: false));
+      state = AsyncValue.data(
+        nextPage.copyWith(items: merged, isLoadingMore: false),
+      );
     } catch (e, st) {
       state = AsyncValue.error(e, st);
     } finally {
@@ -176,14 +183,17 @@ class NovelsNotifier extends StateNotifier<AsyncValue<BrowseResult>> {
   }
 }
 
-final novelsProvider = StateNotifierProvider<NovelsNotifier, AsyncValue<BrowseResult>>((ref) {
-  return NovelsNotifier(ref);
-});
+final novelsProvider =
+    StateNotifierProvider<NovelsNotifier, AsyncValue<BrowseResult>>((ref) {
+      return NovelsNotifier(ref);
+    });
 
 // ─── Novel Detail ─────────────────────────────────────────────────────────────
 
-final novelDetailProvider =
-    FutureProvider.family<NovelModel, String>((ref, idOrSlug) async {
+final novelDetailProvider = FutureProvider.family<NovelModel, String>((
+  ref,
+  idOrSlug,
+) async {
   final repo = ref.read(novelsRepositoryProvider);
   final cached = await repo.getCachedNovel(idOrSlug);
 
@@ -207,8 +217,13 @@ final novelDetailProvider =
 
 // ─── Chapter List ─────────────────────────────────────────────────────────────
 
-final chapterListProvider =
-    FutureProvider.family<List<ChapterListItem>, String>((ref, novelId) async {
+final chapterListProvider = FutureProvider.family<List<ChapterListItem>, String>((
+  ref,
+  novelId,
+) async {
+  final chaptersRepo = ref.read(chaptersRepositoryProvider);
+  final pinned = await chaptersRepo.cachedContentsList(novelId);
+  if (pinned.isNotEmpty) return pinned;
   final client = ref.read(apiClientProvider);
 
   Future<List<ChapterListItem>> fetchAllChapters(String idOrSlug) async {
@@ -226,7 +241,9 @@ final chapterListProvider =
       final chapters = data['chapters'] as List? ?? const [];
 
       items.addAll(
-        chapters.map((e) => ChapterListItem.fromJson(e as Map<String, dynamic>)),
+        chapters.map(
+          (e) => ChapterListItem.fromJson(e as Map<String, dynamic>),
+        ),
       );
 
       final apiTotalPages = (data['totalPages'] as num?)?.toInt() ?? 1;
@@ -238,15 +255,21 @@ final chapterListProvider =
   }
 
   try {
-    return await fetchAllChapters(novelId);
+    final chapters = await fetchAllChapters(novelId);
+    await chaptersRepo.saveMeta(novelId, chapters);
+    return chapters;
   } catch (_) {
+    final cached = await chaptersRepo.cachedMeta(novelId);
+    if (cached.isNotEmpty) return cached;
     // If route opened by slug/id mismatch, resolve canonical novel id and retry once.
     // first request can return empty list. Resolve canonical id and retry once.
     try {
       final novelRes = await client.dio.get('/api/novels/$novelId');
       final novelData = novelRes.data as Map<String, dynamic>;
       final canonicalId = novelData['id'] as String?;
-      if (canonicalId != null && canonicalId.isNotEmpty && canonicalId != novelId) {
+      if (canonicalId != null &&
+          canonicalId.isNotEmpty &&
+          canonicalId != novelId) {
         return await fetchAllChapters(canonicalId);
       }
     } catch (_) {
