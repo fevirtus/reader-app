@@ -32,8 +32,9 @@ class AudioBookController extends ChangeNotifier {
       notifyListeners();
     });
     _timer = Timer.periodic(const Duration(seconds: 5), (_) {
-      if (player.playing && player.processingState == ProcessingState.ready)
+      if (player.playing && player.processingState == ProcessingState.ready) {
         unawaited(save());
+      }
     });
     ref.listen(authProvider, (previous, next) {
       unawaited(stop());
