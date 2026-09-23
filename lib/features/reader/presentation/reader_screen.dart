@@ -1,3 +1,4 @@
+import '../../audiobook/audio_book_screen.dart';
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
@@ -1428,422 +1429,453 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
     final readerMutedColor = readerTextColor.withAlpha(170);
 
     return AnnotatedRegion<SystemUiOverlayStyle>(
-      value: ThemeData.estimateBrightnessForColor(readerBackground) == Brightness.dark
+      value:
+          ThemeData.estimateBrightnessForColor(readerBackground) ==
+              Brightness.dark
           ? SystemUiOverlayStyle.light
           : SystemUiOverlayStyle.dark,
       child: Scaffold(
-      backgroundColor: readerBackground,
-      body: chapterAsync.when(
-        loading: () => const Center(child: CircularProgressIndicator()),
-        error: (e, _) => Center(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Icon(Icons.error_outline, size: 48),
-              const SizedBox(height: 8),
-              Text('Lỗi tải chương: $e'),
-              FilledButton(
-                onPressed: () =>
-                    ref.invalidate(chapterProvider(widget.chapterId)),
-                child: const Text('Thử lại'),
-              ),
-            ],
-          ),
-        ),
-        data: (chapter) {
-          final paragraphs = _paragraphsOf(chapter.content);
-          _ensureParagraphKeys(paragraphs.length);
-          final sentenceSlicesByParagraph = _sentenceSlicesForChapter(
-            chapter,
-            paragraphs,
-          );
-          final textAlign = _textAlignFor(settings.textAlign);
-          final novelAsync = ref.watch(novelDetailProvider(chapter.novelId));
-          final tts = ref.watch(ttsProvider);
-          final shouldHighlightTts =
-              tts.contentKey == chapter.id &&
-              (tts.status == TtsStatus.playing ||
-                  tts.status == TtsStatus.paused);
-          final paragraphStyle = TextStyle(
-            color: readerTextColor,
-            fontSize: settings.fontSize,
-            height: settings.lineHeight,
-            letterSpacing: settings.letterSpacing,
-            fontFamily: _resolveReaderFontFamily(settings.fontFamily),
-          );
-          final paragraphHighlightStyle = paragraphStyle.copyWith(
-            backgroundColor: Theme.of(
-              context,
-            ).colorScheme.primary.withAlpha(80),
-            fontWeight: FontWeight.w600,
-          );
-
-          _maybeAutoScrollToTtsParagraph(tts, paragraphs.length);
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            _initializeChapterSession(chapter);
-          });
-
-          return ColoredBox(
-            color: readerBackground,
+        backgroundColor: readerBackground,
+        body: chapterAsync.when(
+          loading: () => const Center(child: CircularProgressIndicator()),
+          error: (e, _) => Center(
             child: Column(
+              mainAxisSize: MainAxisSize.min,
               children: [
-                ValueListenableBuilder<double>(
-                  valueListenable: _readingProgress,
-                  builder: (context, progress, _) {
-                    return _TopBar(
-                      title: _chapterTopBarTitle(chapter),
-                      progress: progress,
-                      onOpenSettings: () => _openReadingSettingsSheet(
-                        chapter.content,
-                        chapter.id,
-                        'Chương ${chapter.number}: ${chapter.title}',
-                        chapter.nextChapterId,
-                        chapter.number,
-                      ),
-                      barBackgroundColor: readerBackground,
-                      foregroundColor: readerTextColor,
-                    );
-                  },
+                const Icon(Icons.error_outline, size: 48),
+                const SizedBox(height: 8),
+                Text('Lỗi tải chương: $e'),
+                FilledButton(
+                  onPressed: () =>
+                      ref.invalidate(chapterProvider(widget.chapterId)),
+                  child: const Text('Thử lại'),
                 ),
-                Expanded(
-                  child: AnimatedSwitcher(
-                    duration: const Duration(milliseconds: 220),
-                    switchInCurve: Curves.easeOutCubic,
-                    switchOutCurve: Curves.easeInCubic,
-                    transitionBuilder: (child, animation) {
-                      final beginOffset = _chapterDirection < 0
-                          ? const Offset(-0.08, 0)
-                          : const Offset(0.08, 0);
-                      final fade = CurvedAnimation(
-                        parent: animation,
-                        curve: Curves.easeOut,
-                      );
-                      final slide = Tween<Offset>(
-                        begin: beginOffset,
-                        end: Offset.zero,
-                      ).animate(fade);
-                      return FadeTransition(
-                        opacity: fade,
-                        child: SlideTransition(position: slide, child: child),
+              ],
+            ),
+          ),
+          data: (chapter) {
+            final paragraphs = _paragraphsOf(chapter.content);
+            _ensureParagraphKeys(paragraphs.length);
+            final sentenceSlicesByParagraph = _sentenceSlicesForChapter(
+              chapter,
+              paragraphs,
+            );
+            final textAlign = _textAlignFor(settings.textAlign);
+            final novelAsync = ref.watch(novelDetailProvider(chapter.novelId));
+            final tts = ref.watch(ttsProvider);
+            final shouldHighlightTts =
+                tts.contentKey == chapter.id &&
+                (tts.status == TtsStatus.playing ||
+                    tts.status == TtsStatus.paused);
+            final paragraphStyle = TextStyle(
+              color: readerTextColor,
+              fontSize: settings.fontSize,
+              height: settings.lineHeight,
+              letterSpacing: settings.letterSpacing,
+              fontFamily: _resolveReaderFontFamily(settings.fontFamily),
+            );
+            final paragraphHighlightStyle = paragraphStyle.copyWith(
+              backgroundColor: Theme.of(
+                context,
+              ).colorScheme.primary.withAlpha(80),
+              fontWeight: FontWeight.w600,
+            );
+
+            _maybeAutoScrollToTtsParagraph(tts, paragraphs.length);
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              _initializeChapterSession(chapter);
+            });
+
+            return ColoredBox(
+              color: readerBackground,
+              child: Column(
+                children: [
+                  ValueListenableBuilder<double>(
+                    valueListenable: _readingProgress,
+                    builder: (context, progress, _) {
+                      return _TopBar(
+                        title: _chapterTopBarTitle(chapter),
+                        progress: progress,
+                        onOpenSettings: () => _openReadingSettingsSheet(
+                          chapter.content,
+                          chapter.id,
+                          'Chương ${chapter.number}: ${chapter.title}',
+                          chapter.nextChapterId,
+                          chapter.number,
+                        ),
+                        barBackgroundColor: readerBackground,
+                        foregroundColor: readerTextColor,
                       );
                     },
-                    child: KeyedSubtree(
-                      key: ValueKey(chapter.id),
-                      child: Scrollbar(
-                        controller: _scrollCtrl,
-                        child: CustomScrollView(
+                  ),
+                  Expanded(
+                    child: AnimatedSwitcher(
+                      duration: const Duration(milliseconds: 220),
+                      switchInCurve: Curves.easeOutCubic,
+                      switchOutCurve: Curves.easeInCubic,
+                      transitionBuilder: (child, animation) {
+                        final beginOffset = _chapterDirection < 0
+                            ? const Offset(-0.08, 0)
+                            : const Offset(0.08, 0);
+                        final fade = CurvedAnimation(
+                          parent: animation,
+                          curve: Curves.easeOut,
+                        );
+                        final slide = Tween<Offset>(
+                          begin: beginOffset,
+                          end: Offset.zero,
+                        ).animate(fade);
+                        return FadeTransition(
+                          opacity: fade,
+                          child: SlideTransition(position: slide, child: child),
+                        );
+                      },
+                      child: KeyedSubtree(
+                        key: ValueKey(chapter.id),
+                        child: Scrollbar(
                           controller: _scrollCtrl,
-                          slivers: [
-                            SliverPadding(
-                              padding: EdgeInsets.fromLTRB(
-                                settings.horizontalPadding,
-                                16,
-                                settings.horizontalPadding,
-                                chapter.content.trim().isEmpty ? 24 : 0,
-                              ),
-                              sliver: SliverToBoxAdapter(
-                                child: Align(
-                                  alignment: Alignment.topCenter,
-                                  child: ConstrainedBox(
-                                    constraints: const BoxConstraints(
-                                      maxWidth: 760,
-                                    ),
-                                    child: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: [
-                                        novelAsync.when(
-                                          loading: () => Text(
-                                            'Đang tải tên truyện...',
-                                            style: Theme.of(context)
-                                                .textTheme
-                                                .labelSmall
-                                                ?.copyWith(
-                                                  color: readerMutedColor,
-                                                ),
+                          child: CustomScrollView(
+                            controller: _scrollCtrl,
+                            slivers: [
+                              SliverPadding(
+                                padding: EdgeInsets.fromLTRB(
+                                  settings.horizontalPadding,
+                                  16,
+                                  settings.horizontalPadding,
+                                  chapter.content.trim().isEmpty ? 24 : 0,
+                                ),
+                                sliver: SliverToBoxAdapter(
+                                  child: Align(
+                                    alignment: Alignment.topCenter,
+                                    child: ConstrainedBox(
+                                      constraints: const BoxConstraints(
+                                        maxWidth: 760,
+                                      ),
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          novelAsync.when(
+                                            loading: () => Text(
+                                              'Đang tải tên truyện...',
+                                              style: Theme.of(context)
+                                                  .textTheme
+                                                  .labelSmall
+                                                  ?.copyWith(
+                                                    color: readerMutedColor,
+                                                  ),
+                                            ),
+                                            error: (_, _) =>
+                                                const SizedBox.shrink(),
+                                            data: (novel) => Text(
+                                              novel.title,
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
+                                              style: Theme.of(context)
+                                                  .textTheme
+                                                  .labelSmall
+                                                  ?.copyWith(
+                                                    color: readerMutedColor,
+                                                    letterSpacing: 0.2,
+                                                  ),
+                                            ),
                                           ),
-                                          error: (_, _) =>
-                                              const SizedBox.shrink(),
-                                          data: (novel) => Text(
-                                            novel.title,
-                                            maxLines: 1,
-                                            overflow: TextOverflow.ellipsis,
-                                            style: Theme.of(context)
-                                                .textTheme
-                                                .labelSmall
-                                                ?.copyWith(
-                                                  color: readerMutedColor,
-                                                  letterSpacing: 0.2,
-                                                ),
-                                          ),
-                                        ),
-                                        const SizedBox(height: 4),
-                                        Text(
-                                          'Chương ${chapter.number}: ${chapter.title}',
-                                          style: Theme.of(context)
-                                              .textTheme
-                                              .titleLarge
-                                              ?.copyWith(
-                                                color: readerTextColor,
-                                              ),
-                                        ),
-                                        const SizedBox(height: 12),
-                                        const SizedBox(height: 12),
-                                        if (chapter.content.trim().isEmpty)
+                                          const SizedBox(height: 4),
                                           Text(
-                                            'Chương này hiện chưa có nội dung.',
+                                            'Chương ${chapter.number}: ${chapter.title}',
                                             style: Theme.of(context)
                                                 .textTheme
-                                                .bodyMedium
+                                                .titleLarge
                                                 ?.copyWith(
-                                                  color: readerMutedColor,
+                                                  color: readerTextColor,
                                                 ),
                                           ),
-                                      ],
+                                          const SizedBox(height: 12),
+                                          TextButton.icon(
+                                            icon: const Icon(
+                                              Icons.headphones_outlined,
+                                            ),
+                                            label: const Text(
+                                              'Nghe Audio book chương này',
+                                            ),
+                                            onPressed: () =>
+                                                Navigator.of(context).push(
+                                                  MaterialPageRoute(
+                                                    builder: (_) =>
+                                                        AudioBookScreen(
+                                                          novelId:
+                                                              chapter.novelId,
+                                                          initialChapterId:
+                                                              chapter.id,
+                                                        ),
+                                                  ),
+                                                ),
+                                          ),
+                                          const SizedBox(height: 12),
+                                          if (chapter.content.trim().isEmpty)
+                                            Text(
+                                              'Chương này hiện chưa có nội dung.',
+                                              style: Theme.of(context)
+                                                  .textTheme
+                                                  .bodyMedium
+                                                  ?.copyWith(
+                                                    color: readerMutedColor,
+                                                  ),
+                                            ),
+                                        ],
+                                      ),
                                     ),
                                   ),
                                 ),
                               ),
-                            ),
-                            if (chapter.content.trim().isNotEmpty)
-                              SliverPadding(
-                                padding: EdgeInsets.fromLTRB(
-                                  settings.horizontalPadding,
-                                  0,
-                                  settings.horizontalPadding,
-                                  0,
-                                ),
-                                sliver: SliverList.builder(
-                                  itemCount: paragraphs.length,
-                                  itemBuilder: (context, index) {
-                                    final sentenceSlices =
-                                        sentenceSlicesByParagraph[index];
-                                    return Align(
-                                      alignment: Alignment.topCenter,
-                                      child: ConstrainedBox(
-                                        constraints: const BoxConstraints(
-                                          maxWidth: 760,
-                                        ),
-                                        child: SizedBox(
-                                          width: double.infinity,
-                                          child: Padding(
-                                            key: _paragraphKeys[index],
-                                            padding: EdgeInsets.only(
-                                              bottom:
-                                                  index == paragraphs.length - 1
-                                                  ? 0
-                                                  : settings.paragraphSpacing,
-                                            ),
-                                            child: _buildParagraphText(
-                                              context: context,
-                                              sentenceSlices: sentenceSlices,
-                                              textAlign: textAlign,
-                                              style: paragraphStyle,
-                                              highlightStyle:
-                                                  paragraphHighlightStyle,
-                                              isActiveParagraph:
-                                                  shouldHighlightTts &&
-                                                  tts.activeParagraphIndex ==
-                                                      index,
-                                              highlightStart: tts.progressStart,
-                                              highlightEnd: tts.progressEnd,
-                                              onSentenceTap: (charOffset) {
-                                                final hasActiveTtsSession =
-                                                    tts.contentKey ==
-                                                        chapter.id &&
-                                                    (tts.status ==
-                                                            TtsStatus.playing ||
-                                                        tts.status ==
-                                                            TtsStatus.paused);
-                                                final canStartFromSentence =
-                                                    settings
-                                                        .enableSentenceTapTts ||
-                                                    hasActiveTtsSession;
-                                                if (!canStartFromSentence) {
-                                                  return;
-                                                }
-                                                // Synchronous unfocus clears stale SelectableText selection
-                                                // before startReading triggers a widget rebuild + scroll.
-                                                FocusManager
-                                                    .instance
-                                                    .primaryFocus
-                                                    ?.unfocus();
-                                                ref
-                                                    .read(ttsProvider.notifier)
-                                                    .clearPendingAutoStartChapter();
-                                                ref
-                                                    .read(ttsProvider.notifier)
-                                                    .startReading(
-                                                      chapter.content,
-                                                      contentKey: chapter.id,
-                                                      title:
-                                                          'Chương ${chapter.number}: ${chapter.title}',
-                                                      nextChapterId:
-                                                          chapter.nextChapterId,
-                                                      chapterNumber:
-                                                          chapter.number,
-                                                      apiBaseUrl:
-                                                          AppConfig.baseUrl,
-                                                      startParagraphIndex:
-                                                          index,
-                                                      startCharOffset:
-                                                          charOffset,
-                                                    );
-                                              },
-                                              useTapRecognizer:
-                                                  settings
-                                                      .enableSentenceTapTts ||
-                                                  (tts.contentKey ==
+                              if (chapter.content.trim().isNotEmpty)
+                                SliverPadding(
+                                  padding: EdgeInsets.fromLTRB(
+                                    settings.horizontalPadding,
+                                    0,
+                                    settings.horizontalPadding,
+                                    0,
+                                  ),
+                                  sliver: SliverList.builder(
+                                    itemCount: paragraphs.length,
+                                    itemBuilder: (context, index) {
+                                      final sentenceSlices =
+                                          sentenceSlicesByParagraph[index];
+                                      return Align(
+                                        alignment: Alignment.topCenter,
+                                        child: ConstrainedBox(
+                                          constraints: const BoxConstraints(
+                                            maxWidth: 760,
+                                          ),
+                                          child: SizedBox(
+                                            width: double.infinity,
+                                            child: Padding(
+                                              key: _paragraphKeys[index],
+                                              padding: EdgeInsets.only(
+                                                bottom:
+                                                    index ==
+                                                        paragraphs.length - 1
+                                                    ? 0
+                                                    : settings.paragraphSpacing,
+                                              ),
+                                              child: _buildParagraphText(
+                                                context: context,
+                                                sentenceSlices: sentenceSlices,
+                                                textAlign: textAlign,
+                                                style: paragraphStyle,
+                                                highlightStyle:
+                                                    paragraphHighlightStyle,
+                                                isActiveParagraph:
+                                                    shouldHighlightTts &&
+                                                    tts.activeParagraphIndex ==
+                                                        index,
+                                                highlightStart:
+                                                    tts.progressStart,
+                                                highlightEnd: tts.progressEnd,
+                                                onSentenceTap: (charOffset) {
+                                                  final hasActiveTtsSession =
+                                                      tts.contentKey ==
                                                           chapter.id &&
                                                       (tts.status ==
                                                               TtsStatus
                                                                   .playing ||
                                                           tts.status ==
-                                                              TtsStatus
-                                                                  .paused)),
+                                                              TtsStatus.paused);
+                                                  final canStartFromSentence =
+                                                      settings
+                                                          .enableSentenceTapTts ||
+                                                      hasActiveTtsSession;
+                                                  if (!canStartFromSentence) {
+                                                    return;
+                                                  }
+                                                  // Synchronous unfocus clears stale SelectableText selection
+                                                  // before startReading triggers a widget rebuild + scroll.
+                                                  FocusManager
+                                                      .instance
+                                                      .primaryFocus
+                                                      ?.unfocus();
+                                                  ref
+                                                      .read(
+                                                        ttsProvider.notifier,
+                                                      )
+                                                      .clearPendingAutoStartChapter();
+                                                  ref
+                                                      .read(
+                                                        ttsProvider.notifier,
+                                                      )
+                                                      .startReading(
+                                                        chapter.content,
+                                                        contentKey: chapter.id,
+                                                        title:
+                                                            'Chương ${chapter.number}: ${chapter.title}',
+                                                        nextChapterId: chapter
+                                                            .nextChapterId,
+                                                        chapterNumber:
+                                                            chapter.number,
+                                                        apiBaseUrl:
+                                                            AppConfig.baseUrl,
+                                                        startParagraphIndex:
+                                                            index,
+                                                        startCharOffset:
+                                                            charOffset,
+                                                      );
+                                                },
+                                                useTapRecognizer:
+                                                    settings
+                                                        .enableSentenceTapTts ||
+                                                    (tts.contentKey ==
+                                                            chapter.id &&
+                                                        (tts.status ==
+                                                                TtsStatus
+                                                                    .playing ||
+                                                            tts.status ==
+                                                                TtsStatus
+                                                                    .paused)),
+                                              ),
                                             ),
                                           ),
                                         ),
-                                      ),
-                                    );
-                                  },
+                                      );
+                                    },
+                                  ),
                                 ),
-                              ),
-                            SliverPadding(
-                              padding: EdgeInsets.fromLTRB(
-                                settings.horizontalPadding,
-                                40,
-                                settings.horizontalPadding,
-                                92,
-                              ),
-                              sliver: SliverToBoxAdapter(
-                                child: Align(
-                                  alignment: Alignment.topCenter,
-                                  child: ConstrainedBox(
-                                    constraints: const BoxConstraints(
-                                      maxWidth: 760,
-                                    ),
-                                    child: _NavButtons(
-                                      chapter: chapter,
-                                      onGoPrevious: () =>
-                                          _goToPreviousChapter(chapter),
-                                      onGoNext: () => _goToNextChapter(chapter),
+                              SliverPadding(
+                                padding: EdgeInsets.fromLTRB(
+                                  settings.horizontalPadding,
+                                  40,
+                                  settings.horizontalPadding,
+                                  92,
+                                ),
+                                sliver: SliverToBoxAdapter(
+                                  child: Align(
+                                    alignment: Alignment.topCenter,
+                                    child: ConstrainedBox(
+                                      constraints: const BoxConstraints(
+                                        maxWidth: 760,
+                                      ),
+                                      child: _NavButtons(
+                                        chapter: chapter,
+                                        onGoPrevious: () =>
+                                            _goToPreviousChapter(chapter),
+                                        onGoNext: () =>
+                                            _goToNextChapter(chapter),
+                                      ),
                                     ),
                                   ),
                                 ),
                               ),
-                            ),
-                          ],
+                            ],
+                          ),
                         ),
                       ),
                     ),
                   ),
-                ),
-              ],
-            ),
-          );
-        },
-      ),
-      bottomNavigationBar: chapterAsync.whenOrNull(
-        data: (chapter) {
-          final tts = ref.watch(ttsProvider);
-          final showMini =
-              tts.contentKey == chapter.id &&
-              (tts.status == TtsStatus.playing ||
-                  tts.status == TtsStatus.paused);
-          return ColoredBox(
-            color: readerBackground,
-            child: SafeArea(
-              top: false,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  ValueListenableBuilder<bool>(
-                    valueListenable: _showQuickActions,
-                    builder: (context, visible, _) => AnimatedSize(
-                      duration: const Duration(milliseconds: 180),
-                      child: !visible
-                          ? const SizedBox.shrink()
-                          : Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 16,
-                                vertical: 4,
-                              ),
-                              decoration: BoxDecoration(
-                                border: Border(
-                                  top: BorderSide(
-                                    color: readerTextColor.withAlpha(25),
-                                  ),
-                                ),
-                              ),
-                              child: Row(
-                                children: [
-                                  IconButton(
-                                    tooltip: 'Chương trước',
-                                    color: readerTextColor,
-                                    onPressed: chapter.prevChapterId == null
-                                        ? null
-                                        : () => _goToPreviousChapter(chapter),
-                                    icon: const Icon(
-                                      Icons.chevron_left_rounded,
-                                    ),
-                                  ),
-                                  Expanded(
-                                    child: TextButton.icon(
-                                      style: TextButton.styleFrom(
-                                        foregroundColor: readerTextColor,
-                                      ),
-                                      onPressed: () => _openChapterToc(chapter),
-                                      icon: const Icon(
-                                        Icons.format_list_bulleted_rounded,
-                                        size: 20,
-                                      ),
-                                      label: const Text('Mục lục'),
-                                    ),
-                                  ),
-                                  IconButton(
-                                    tooltip: 'Về đầu chương',
-                                    color: readerTextColor,
-                                    onPressed: _scrollToTop,
-                                    icon: const Icon(
-                                      Icons.vertical_align_top_rounded,
-                                      size: 20,
-                                    ),
-                                  ),
-                                  IconButton(
-                                    tooltip: 'Chương sau',
-                                    color: readerTextColor,
-                                    onPressed: chapter.nextChapterId == null
-                                        ? null
-                                        : () => _goToNextChapter(chapter),
-                                    icon: const Icon(
-                                      Icons.chevron_right_rounded,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                    ),
-                  ),
-                  if (showMini)
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(12, 4, 12, 10),
-                      child: TtsPlayerWidget(
-                        compact: true,
-                        content: chapter.content,
-                        contentKey: chapter.id,
-                        title: 'Chương ${chapter.number}: ${chapter.title}',
-                        nextChapterId: chapter.nextChapterId,
-                        chapterNumber: chapter.number,
-                        apiBaseUrl: AppConfig.baseUrl,
-                      ),
-                    ),
                 ],
               ),
-            ),
-          );
-        },
-      ),
+            );
+          },
+        ),
+        bottomNavigationBar: chapterAsync.whenOrNull(
+          data: (chapter) {
+            final tts = ref.watch(ttsProvider);
+            final showMini =
+                tts.contentKey == chapter.id &&
+                (tts.status == TtsStatus.playing ||
+                    tts.status == TtsStatus.paused);
+            return ColoredBox(
+              color: readerBackground,
+              child: SafeArea(
+                top: false,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    ValueListenableBuilder<bool>(
+                      valueListenable: _showQuickActions,
+                      builder: (context, visible, _) => AnimatedSize(
+                        duration: const Duration(milliseconds: 180),
+                        child: !visible
+                            ? const SizedBox.shrink()
+                            : Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 16,
+                                  vertical: 4,
+                                ),
+                                decoration: BoxDecoration(
+                                  border: Border(
+                                    top: BorderSide(
+                                      color: readerTextColor.withAlpha(25),
+                                    ),
+                                  ),
+                                ),
+                                child: Row(
+                                  children: [
+                                    IconButton(
+                                      tooltip: 'Chương trước',
+                                      color: readerTextColor,
+                                      onPressed: chapter.prevChapterId == null
+                                          ? null
+                                          : () => _goToPreviousChapter(chapter),
+                                      icon: const Icon(
+                                        Icons.chevron_left_rounded,
+                                      ),
+                                    ),
+                                    Expanded(
+                                      child: TextButton.icon(
+                                        style: TextButton.styleFrom(
+                                          foregroundColor: readerTextColor,
+                                        ),
+                                        onPressed: () =>
+                                            _openChapterToc(chapter),
+                                        icon: const Icon(
+                                          Icons.format_list_bulleted_rounded,
+                                          size: 20,
+                                        ),
+                                        label: const Text('Mục lục'),
+                                      ),
+                                    ),
+                                    IconButton(
+                                      tooltip: 'Về đầu chương',
+                                      color: readerTextColor,
+                                      onPressed: _scrollToTop,
+                                      icon: const Icon(
+                                        Icons.vertical_align_top_rounded,
+                                        size: 20,
+                                      ),
+                                    ),
+                                    IconButton(
+                                      tooltip: 'Chương sau',
+                                      color: readerTextColor,
+                                      onPressed: chapter.nextChapterId == null
+                                          ? null
+                                          : () => _goToNextChapter(chapter),
+                                      icon: const Icon(
+                                        Icons.chevron_right_rounded,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                      ),
+                    ),
+                    if (showMini)
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(12, 4, 12, 10),
+                        child: TtsPlayerWidget(
+                          compact: true,
+                          content: chapter.content,
+                          contentKey: chapter.id,
+                          title: 'Chương ${chapter.number}: ${chapter.title}',
+                          nextChapterId: chapter.nextChapterId,
+                          chapterNumber: chapter.number,
+                          apiBaseUrl: AppConfig.baseUrl,
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            );
+          },
+        ),
       ),
     );
   }

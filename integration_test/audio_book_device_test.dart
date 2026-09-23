@@ -7,6 +7,7 @@ import 'package:integration_test/integration_test.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:reader_app/features/audiobook/audio_book_controller.dart';
+import 'package:reader_app/features/audiobook/audio_book_player_screen.dart';
 import 'package:just_audio_background/just_audio_background.dart';
 
 void main() {
@@ -89,8 +90,24 @@ void main() {
         await controller.play(book, chapters[0]);
         await waitUntil(() => player.position.inMilliseconds > 100);
         expect(player.duration!.inSeconds, 4);
-        await controller.toggle();
+        await tester.pumpWidget(UncontrolledProviderScope(container: container,
+          child: const MaterialApp(home: AudioBookPlayerScreen())));
+        await tester.pump();
+        expect(find.text('Đang nghe'), findsOneWidget);
+        expect(find.text('Đọc chương này'), findsOneWidget);
+        await tester.tap(find.byTooltip('Tạm dừng'));
+        await tester.pump();
         expect(player.playing, false);
+        expect(controller.adjacent(-1), isNull);
+        expect(controller.adjacent(1)?['id'], 'c2');
+        await controller.moveChapter(1);
+        await waitUntil(() => controller.chapter?['id'] == 'c2');
+        await controller.toggle();
+        expect(controller.adjacent(1), isNull);
+        await controller.moveChapter(-1);
+        await waitUntil(() => player.playing);
+        await controller.toggle();
+        await tester.pumpWidget(const MaterialApp(home: Scaffold(body: Text('Audio test'))));
         await player.seek(const Duration(seconds: 2));
         expect(player.position.inMilliseconds, greaterThanOrEqualTo(1900));
         await player.setSpeed(1.5);

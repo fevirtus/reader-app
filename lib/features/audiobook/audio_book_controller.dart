@@ -264,6 +264,35 @@ class AudioBookController extends ChangeNotifier {
     await play(book, item, position: _resumePosition);
   }
 
+  AudioJson? adjacent(int step) {
+    final chapters = (edition?['chapters'] as List? ?? []);
+    final index = chapters.indexWhere((item) => item['id'] == chapter?['id']);
+    final target = index + step;
+    if (index < 0 ||
+        target < 0 ||
+        target >= chapters.length ||
+        chapters[target]['url'] == null) {
+      return null;
+    }
+    return Map<String, dynamic>.from(chapters[target]);
+  }
+
+  Future<void> moveChapter(int step) async {
+    final item = adjacent(step), book = edition;
+    if (!loading && item != null && book != null) await play(book, item);
+  }
+
+  Future<void> seek(Duration value) async {
+    final duration = player.duration;
+    if (loading || duration == null) return;
+    final position = Duration(
+      milliseconds: value.inMilliseconds.clamp(0, duration.inMilliseconds),
+    );
+    await player.seek(position);
+    _resumePosition = position;
+    await save();
+  }
+
   Future<void> toggle() async {
     if (player.playing || (_wantsPlay && error != null)) {
       _wantsPlay = false;
@@ -278,6 +307,9 @@ class AudioBookController extends ChangeNotifier {
       await _resume();
     } else {
       await ref.read(ttsProvider.notifier).stop();
+      if (player.processingState == ProcessingState.completed) {
+        await seek(Duration.zero);
+      }
       _wantsPlay = true;
       unawaited(player.play().catchError((Object e) => _failed(_generation)));
     }

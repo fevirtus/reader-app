@@ -7,10 +7,16 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/network/providers.dart';
 import 'audio_book_controller.dart';
 import 'audio_book_voice_picker.dart';
+import 'audio_book_player_screen.dart';
 
 class AudioBookScreen extends ConsumerStatefulWidget {
-  const AudioBookScreen({super.key, required this.novelId});
+  const AudioBookScreen({
+    super.key,
+    required this.novelId,
+    this.initialChapterId,
+  });
   final String novelId;
+  final String? initialChapterId;
   @override
   ConsumerState<AudioBookScreen> createState() => _AudioBookScreenState();
 }
@@ -41,6 +47,35 @@ class _AudioBookScreenState extends ConsumerState<AudioBookScreen> {
     }
     unawaited(controller.sync(widget.novelId, controller.account));
     await _refresh();
+    if (!mounted || widget.initialChapterId == null) return;
+    final ordered = [..._remote]
+      ..sort(
+        (a, b) => a['id'] == _selected
+            ? -1
+            : b['id'] == _selected
+            ? 1
+            : 0,
+      );
+    for (final book in ordered) {
+      final chapter = (book['chapters'] as List)
+          .where((c) => c['id'] == widget.initialChapterId && c['url'] != null)
+          .firstOrNull;
+      if (chapter != null) {
+        _openPlayer(book, Map<String, dynamic>.from(chapter));
+        return;
+      }
+    }
+    setState(
+      () => _error =
+          'Chương đang đọc chưa có audio. Bạn có thể chọn giọng và gửi yêu cầu.',
+    );
+  }
+
+  void _openPlayer(AudioJson book, AudioJson chapter) {
+    unawaited(ref.read(audioBookControllerProvider).play(book, chapter));
+    Navigator.of(
+      context,
+    ).push(MaterialPageRoute(builder: (_) => const AudioBookPlayerScreen()));
   }
 
   bool _refreshing = false;
@@ -165,54 +200,63 @@ class _AudioBookScreenState extends ConsumerState<AudioBookScreen> {
                             ),
                           ),
                         const SizedBox(height: 16),
-                        if (_voices.isNotEmpty) ...[
-                          Card(
-                            child: ListTile(
-                              leading: const Icon(
-                                Icons.record_voice_over_outlined,
+                        if (_voices.isNotEmpty)
+                          ExpansionTile(
+                            title: const Text('Chọn giọng và gửi yêu cầu'),
+                            tilePadding: EdgeInsets.zero,
+                            children: [
+                              Card(
+                                child: ListTile(
+                                  leading: const Icon(
+                                    Icons.record_voice_over_outlined,
+                                  ),
+                                  title: Text(
+                                    _voices
+                                            .where(
+                                              (v) => v['id'] == _requestVoice,
+                                            )
+                                            .firstOrNull?['name'] ??
+                                        'Chọn giọng đọc',
+                                  ),
+                                  subtitle: Text(
+                                    '${_voices.length} giọng · Chọn và nghe thử',
+                                  ),
+                                  trailing: const Icon(Icons.chevron_right),
+                                  onTap: () async {
+                                    final choice =
+                                        await showModalBottomSheet<String>(
+                                          context: context,
+                                          isScrollControlled: true,
+                                          showDragHandle: true,
+                                          builder: (_) => SizedBox(
+                                            height:
+                                                MediaQuery.sizeOf(
+                                                  context,
+                                                ).height *
+                                                .8,
+                                            child: AudioBookVoicePicker(
+                                              voices: _voices,
+                                              selected: _requestVoice,
+                                            ),
+                                          ),
+                                        );
+                                    if (mounted && choice != null) {
+                                      setState(() => _requestVoice = choice);
+                                    }
+                                  },
+                                ),
                               ),
-                              title: Text(
-                                _voices
-                                        .where((v) => v['id'] == _requestVoice)
-                                        .firstOrNull?['name'] ??
-                                    'Chọn giọng đọc',
+                              const SizedBox(height: 8),
+                              FilledButton(
+                                onPressed: _requesting ? null : _request,
+                                child: Text(
+                                  _requesting
+                                      ? 'Đang gửi…'
+                                      : 'Yêu cầu tạo Audio book',
+                                ),
                               ),
-                              subtitle: Text(
-                                '${_voices.length} giọng · Chọn và nghe thử',
-                              ),
-                              trailing: const Icon(Icons.chevron_right),
-                              onTap: () async {
-                                final choice =
-                                    await showModalBottomSheet<String>(
-                                      context: context,
-                                      isScrollControlled: true,
-                                      showDragHandle: true,
-                                      builder: (_) => SizedBox(
-                                        height:
-                                            MediaQuery.sizeOf(context).height *
-                                            .8,
-                                        child: AudioBookVoicePicker(
-                                          voices: _voices,
-                                          selected: _requestVoice,
-                                        ),
-                                      ),
-                                    );
-                                if (mounted && choice != null) {
-                                  setState(() => _requestVoice = choice);
-                                }
-                              },
-                            ),
+                            ],
                           ),
-                          const SizedBox(height: 8),
-                          FilledButton(
-                            onPressed: _requesting ? null : _request,
-                            child: Text(
-                              _requesting
-                                  ? 'Đang gửi…'
-                                  : 'Yêu cầu tạo Audio book',
-                            ),
-                          ),
-                        ],
                         const SizedBox(height: 16),
                         Wrap(
                           spacing: 8,
@@ -265,7 +309,7 @@ class _AudioBookScreenState extends ConsumerState<AudioBookScreen> {
                         ? const Icon(Icons.play_circle_outline)
                         : const Icon(Icons.schedule),
                     onTap: c['assetId'] != null
-                        ? () => controller.play(effective!, c)
+                        ? () => _openPlayer(effective!, c)
                         : null,
                   );
                 },
@@ -274,104 +318,30 @@ class _AudioBookScreenState extends ConsumerState<AudioBookScreen> {
       bottomNavigationBar: controller.chapter == null
           ? null
           : SafeArea(
-              child: Padding(
-                padding: const EdgeInsets.all(12),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      'Chương ${controller.chapter!['number']} · ${controller.chapter!['title'] ?? ''}',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
+              child: Card(
+                margin: const EdgeInsets.all(12),
+                child: ListTile(
+                  leading: const Icon(Icons.headphones),
+                  title: Text(
+                    'Chương ${controller.chapter!['number']} · ${controller.chapter!['title'] ?? ''}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  subtitle: const Text('Mở màn nghe'),
+                  onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => const AudioBookPlayerScreen(),
                     ),
-                    if (controller.error != null)
-                      Text(
-                        controller.error!,
-                        style: TextStyle(
-                          color: Theme.of(context).colorScheme.error,
-                        ),
-                      ),
-                    StreamBuilder<Duration>(
-                      stream: controller.player.positionStream,
-                      builder: (_, snapshot) {
-                        final duration =
-                            controller.player.duration?.inMilliseconds
-                                .toDouble() ??
-                            0;
-                        final position = (snapshot.data?.inMilliseconds ?? 0)
-                            .toDouble()
-                            .clamp(0.0, duration);
-                        return Slider(
-                          value: position,
-                          max: duration > 0 ? duration : 1,
-                          onChanged: duration > 0
-                              ? (v) => controller.player.seek(
-                                  Duration(milliseconds: v.round()),
-                                )
-                              : null,
-                        );
-                      },
+                  ),
+                  trailing: IconButton(
+                    tooltip: controller.player.playing ? 'Tạm dừng' : 'Phát',
+                    onPressed: controller.loading ? null : controller.toggle,
+                    icon: Icon(
+                      controller.player.playing
+                          ? Icons.pause
+                          : Icons.play_arrow,
                     ),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        IconButton(
-                          tooltip: 'Lùi 15 giây',
-                          onPressed: () => controller.player.seek(
-                            Duration(
-                              milliseconds:
-                                  (controller.player.position.inMilliseconds -
-                                          15000)
-                                      .clamp(0, 86400000),
-                            ),
-                          ),
-                          icon: const Icon(Icons.replay_10),
-                        ),
-                        IconButton.filled(
-                          tooltip: controller.player.playing
-                              ? 'Tạm dừng'
-                              : 'Phát',
-                          onPressed: controller.loading
-                              ? null
-                              : controller.toggle,
-                          icon: controller.loading
-                              ? const SizedBox(
-                                  width: 20,
-                                  height: 20,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2,
-                                  ),
-                                )
-                              : Icon(
-                                  controller.player.playing
-                                      ? Icons.pause
-                                      : Icons.play_arrow,
-                                ),
-                        ),
-                        const SizedBox(width: 16),
-                        DropdownButton<double>(
-                          value: controller.player.speed,
-                          items: [0.75, 1.0, 1.25, 1.5, 2.0]
-                              .map(
-                                (v) => DropdownMenuItem(
-                                  value: v,
-                                  child: Text('$v×'),
-                                ),
-                              )
-                              .toList(),
-                          onChanged: (v) async {
-                            await controller.player.setSpeed(v!);
-                            if (mounted) setState(() {});
-                          },
-                        ),
-                        IconButton(
-                          tooltip: 'Dừng Audio book',
-                          onPressed: controller.stop,
-                          icon: const Icon(Icons.stop),
-                        ),
-                      ],
-                    ),
-                  ],
+                  ),
                 ),
               ),
             ),
