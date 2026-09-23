@@ -19,6 +19,7 @@ class _AudioBookScreenState extends ConsumerState<AudioBookScreen> {
   List<AudioJson> _remote = [], _local = [], _voices = [];
   String? _selected, _error;
   String _requestVoice = 'anh-khoi';
+  String? _novelTitle;
   bool _loading = true, _requesting = false;
   CancelToken? _download;
   int _done = 0, _total = 0;
@@ -63,6 +64,7 @@ class _AudioBookScreenState extends ConsumerState<AudioBookScreen> {
       ]);
       if (mounted) {
         setState(() {
+          _novelTitle = results[0].data['title'] as String?;
           _remote = (results[0].data['editions'] as List)
               .map((e) => Map<String, dynamic>.from(e))
               .toList();
@@ -228,7 +230,7 @@ class _AudioBookScreenState extends ConsumerState<AudioBookScreen> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          selected?['title'] ?? 'Nghe truyện theo cách của bạn',
+                          selected?['title'] ?? _novelTitle ?? 'Audio book',
                           style: Theme.of(context).textTheme.headlineSmall,
                         ),
                         const SizedBox(height: 8),
