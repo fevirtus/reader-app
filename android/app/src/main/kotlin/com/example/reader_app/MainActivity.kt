@@ -11,6 +11,7 @@ import io.flutter.embedding.engine.FlutterEngine
 import com.ryanheise.audioservice.AudioServiceActivity
 import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodChannel
+import com.example.reader_app.tts.ReaderSleepTimer
 import com.example.reader_app.tts.ReaderTtsMediaBridge
 import com.example.reader_app.tts.ReaderTtsMediaService
 import com.example.reader_app.tts.ReaderTtsStartRequest
@@ -23,6 +24,19 @@ class MainActivity : AudioServiceActivity() {
 
 	override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
 		super.configureFlutterEngine(flutterEngine)
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "reader_app/sleep_timer")
+            .setMethodCallHandler { call, result ->
+                if (call.method == "set") {
+                    val milliseconds = call.argument<Number>("milliseconds")?.toLong()
+                    if (milliseconds != null && (milliseconds <= 0 || milliseconds > 86_400_000L)) {
+                        result.error("invalid_duration", "Invalid sleep timer duration", null)
+                    } else {
+                        ReaderSleepTimer.set(this, milliseconds)
+                        result.success(null)
+                    }
+                } else result.notImplemented()
+            }
+
 
 		MethodChannel(flutterEngine.dartExecutor.binaryMessenger, channelName)
 			.setMethodCallHandler { call, result ->

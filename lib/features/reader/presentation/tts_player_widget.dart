@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../tts/tts_service.dart';
+import '../../../core/audio/sleep_timer_button.dart';
 
 class TtsPlayerWidget extends ConsumerWidget {
   const TtsPlayerWidget({
@@ -183,6 +184,7 @@ class TtsPlayerWidget extends ConsumerWidget {
                         ? notifier.stop
                         : null,
                   ),
+                  const SleepTimerButton(compact: true),
                   speedButton(),
                 ],
               ),
@@ -245,6 +247,7 @@ class TtsPlayerWidget extends ConsumerWidget {
                     : null,
               ),
               speedButton(),
+              const SleepTimerButton(),
             ],
           ),
           const SizedBox(height: 6),

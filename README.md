@@ -187,3 +187,16 @@ Bản thử này không cấu hình Google Sign-In. Script tự đưa app ra n�
 script để dùng package test riêng và kiểm tra bản Play Store không bị thay đổi.
 Suite tạo/xóa chương mẫu riêng,
 không cần tắt Wi-Fi và không dùng tài khoản thật.
+
+### Hẹn giờ tắt
+
+Nút hình mặt trăng trong trình phát TTS và Audio book mở các mốc 10/15/30/45/60/90 phút.
+Một hẹn giờ dùng chung, tiếp tục đếm khi đổi chương hoặc tạm dừng; có thể đổi hoặc huỷ.
+Hết giờ tạm dừng, giữ vị trí nghe và huỷ việc tự nối lại audio. Android có thêm deadline
+ở lớp native cho TTS; không cần quyền báo thức chính xác. Hẹn giờ không lưu qua khởi động lại máy.
+
+Kiểm thử cả hai trình phát ở nền, dùng package thử nghiệm riêng:
+
+```bash
+python3 scripts/test_tts_device.py <device-id> --target integration_test/sleep_timer_device_test.dart
+```

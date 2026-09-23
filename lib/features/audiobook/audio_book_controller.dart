@@ -22,6 +22,7 @@ final audioBookControllerProvider = ChangeNotifierProvider(
 class AudioBookController extends ChangeNotifier {
   AudioBookController(this.ref) {
     PlaybackExclusion.stopAudioBook = stop;
+    PlaybackExclusion.pauseAudioBook = pauseForSleep;
     _states = player.playerStateStream.listen((s) {
       if (_disposed) return;
       if (!loading && s.processingState == ProcessingState.ready) {
@@ -293,6 +294,23 @@ class AudioBookController extends ChangeNotifier {
     await save();
   }
 
+  Future<void> pauseForSleep() async {
+    ++_generation; // Cancel in-flight loads and retries before any awaited I/O.
+    _wantsPlay = false;
+    _retry?.cancel();
+    _retry = null;
+    final wasLoading = loading;
+    loading = false;
+    if (wasLoading) {
+      await player.stop();
+    } else {
+      await player.pause();
+      await save();
+    }
+    error = null;
+    if (!_disposed) notifyListeners();
+  }
+
   Future<void> toggle() async {
     if (player.playing || (_wantsPlay && error != null)) {
       _wantsPlay = false;
@@ -414,6 +432,7 @@ class AudioBookController extends ChangeNotifier {
     unawaited(_indexes.cancel());
     unawaited(_positions.cancel());
     PlaybackExclusion.stopAudioBook = null;
+    PlaybackExclusion.pauseAudioBook = null;
     _timer.cancel();
     unawaited(_states.cancel());
     unawaited(_errors.cancel());

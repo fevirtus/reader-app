@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../app/router/route_names.dart';
 import 'audio_book_controller.dart';
+import '../../core/audio/sleep_timer_button.dart';
 
 /// Full-screen listening uses the same background player as the chapter library.
 class AudioBookPlayerScreen extends ConsumerWidget {
@@ -221,7 +222,8 @@ class AudioBookPlayerScreen extends ConsumerWidget {
                             ),
                           ],
                         ),
-                        const SizedBox(height: 24),
+                        const SleepTimerButton(),
+                        const SizedBox(height: 12),
                         OutlinedButton.icon(
                           onPressed: () async {
                             final id = chapter['id'] as String;

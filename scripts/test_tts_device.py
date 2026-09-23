@@ -10,6 +10,9 @@ import sys
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('device', help='ADB/Flutter device ID')
+    parser.add_argument('--target', default='integration_test/tts_device_test.dart',
+                        choices=['integration_test/tts_device_test.dart',
+                                 'integration_test/sleep_timer_device_test.dart'])
     args = parser.parse_args()
     root = Path(__file__).resolve().parent.parent
     env = dict(os.environ, READER_DEVICE_TEST='1')
@@ -23,7 +26,7 @@ def main():
 
     before = original_path()
     process = subprocess.Popen(
-        ['flutter', 'test', 'integration_test/tts_device_test.dart', '-d', args.device],
+        ['flutter', 'test', args.target, '-d', args.device],
         cwd=root, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
         text=True, bufsize=1,
     )
