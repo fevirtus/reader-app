@@ -6,7 +6,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/network/providers.dart';
 import 'audio_book_controller.dart';
-import 'audio_book_store.dart';
 
 class AudioBookScreen extends ConsumerStatefulWidget {
   const AudioBookScreen({super.key, required this.novelId});
@@ -16,13 +15,11 @@ class AudioBookScreen extends ConsumerStatefulWidget {
 }
 
 class _AudioBookScreenState extends ConsumerState<AudioBookScreen> {
-  List<AudioJson> _remote = [], _local = [], _voices = [];
+  List<AudioJson> _remote = [], _voices = [];
   String? _selected, _error;
   String _requestVoice = 'anh-khoi';
   String? _novelTitle;
   bool _loading = true, _requesting = false;
-  CancelToken? _download;
-  int _done = 0, _total = 0;
   Timer? _timer;
   @override
   void initState() {
@@ -32,13 +29,6 @@ class _AudioBookScreenState extends ConsumerState<AudioBookScreen> {
   }
 
   Future<void> _load() async {
-    final store = ref.read(audioBookStoreProvider);
-    final local = await store.saved(novelId: widget.novelId);
-    if (!mounted) return;
-    setState(() {
-      _local = local;
-      _loading = local.isEmpty;
-    });
     final controller = ref.read(audioBookControllerProvider);
     final prefs = await SharedPreferences.getInstance();
     final progress = jsonDecode(
@@ -78,7 +68,7 @@ class _AudioBookScreenState extends ConsumerState<AudioBookScreen> {
       if (mounted) {
         setState(
           () => _error =
-              'Không kết nối được máy chủ. Các bản đã tải vẫn nghe được.',
+              'Không kết nối được máy chủ. Audio book cần kết nối mạng.',
         );
       }
     } finally {
@@ -113,73 +103,9 @@ class _AudioBookScreenState extends ConsumerState<AudioBookScreen> {
     }
   }
 
-  Future<void> _saveOffline(AudioJson edition) async {
-    final cancel = CancelToken();
-    setState(() {
-      _download = cancel;
-      _done = 0;
-      _total = 0;
-      _error = null;
-    });
-    try {
-      await ref.read(audioBookStoreProvider).download(edition, cancel, (
-        done,
-        total,
-      ) {
-        if (mounted) {
-          setState(() {
-            _done = done;
-            _total = total;
-          });
-        }
-      });
-      final local = await ref
-          .read(audioBookStoreProvider)
-          .saved(novelId: widget.novelId);
-      if (mounted) setState(() => _local = local);
-    } catch (e) {
-      if (mounted && !cancel.isCancelled) {
-        setState(
-          () => _error =
-              'Tải chưa hoàn tất. Bản cũ được giữ nguyên; bấm tải để tiếp tục.',
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _download = null);
-    }
-  }
-
-  Future<void> _delete(AudioJson edition) async {
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Xóa Audio book offline?'),
-        content: const Text(
-          'Chỉ xóa audio của bản giọng này trên thiết bị. Văn bản truyện và bản trên máy chủ được giữ nguyên.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Giữ lại'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('Xóa'),
-          ),
-        ],
-      ),
-    );
-    if (ok != true || !mounted) return;
-    final player = ref.read(audioBookControllerProvider);
-    if (player.edition?['id'] == edition['id']) await player.stop();
-    await ref.read(audioBookStoreProvider).delete(edition['id']);
-    if (mounted) await _load();
-  }
-
   @override
   void dispose() {
     _timer?.cancel();
-    _download?.cancel();
     super.dispose();
   }
 
@@ -187,22 +113,12 @@ class _AudioBookScreenState extends ConsumerState<AudioBookScreen> {
   Widget build(BuildContext context) {
     final controller = ref.watch(audioBookControllerProvider);
     final editions = <String, AudioJson>{
-      for (final e in _local) e['id'] as String: e,
       for (final e in _remote) e['id'] as String: e,
     };
     final selected =
         editions[_selected] ??
         (editions.isEmpty ? null : editions.values.first);
-    AudioJson? saved;
-    if (selected != null) {
-      for (final e in _local) {
-        if (e['id'] == selected['id']) saved = e;
-      }
-    }
-    final hasUpdate =
-        saved != null && saved['revision'] != selected?['revision'];
-    // Keep the saved snapshot until the user explicitly downloads the update.
-    final effective = saved ?? selected;
+    final effective = selected;
     final chapters = (effective?['chapters'] as List? ?? [])
         .map((c) => Map<String, dynamic>.from(c))
         .toList();
@@ -235,7 +151,7 @@ class _AudioBookScreenState extends ConsumerState<AudioBookScreen> {
                         ),
                         const SizedBox(height: 8),
                         const Text(
-                          'Các bản giọng được tạo theo từng chương. Có thể nghe ngay khi chương hoàn tất.',
+                          'Nghe trực tuyến từng chương với giọng bạn chọn. Cần kết nối mạng để phát Audio book.',
                         ),
                         if (_error != null)
                           Padding(
@@ -296,70 +212,6 @@ class _AudioBookScreenState extends ConsumerState<AudioBookScreen> {
                               )
                               .toList(),
                         ),
-                        if (selected != null)
-                          Padding(
-                            padding: const EdgeInsets.symmetric(vertical: 12),
-                            child: Wrap(
-                              spacing: 8,
-                              runSpacing: 8,
-                              children: [
-                                if (_download == null)
-                                  OutlinedButton.icon(
-                                    onPressed:
-                                        (selected['readyCount'] as num) > 0
-                                        ? () => _saveOffline(selected)
-                                        : null,
-                                    icon: Icon(
-                                      hasUpdate
-                                          ? Icons.system_update_alt
-                                          : Icons.download_for_offline_outlined,
-                                    ),
-                                    label: Text(
-                                      hasUpdate
-                                          ? 'Có bản cập nhật mới'
-                                          : saved != null
-                                          ? 'Tải lại / bổ sung'
-                                          : 'Tải Audio book offline',
-                                    ),
-                                  ),
-                                if (saved != null)
-                                  IconButton(
-                                    tooltip: 'Xóa bản tải trên máy',
-                                    onPressed: _download == null
-                                        ? () => _delete(saved!)
-                                        : null,
-                                    icon: const Icon(Icons.delete_outline),
-                                  ),
-                              ],
-                            ),
-                          ),
-                        if (_download != null)
-                          Column(
-                            children: [
-                              LinearProgressIndicator(
-                                value: _total > 0 ? _done / _total : null,
-                              ),
-                              Row(
-                                mainAxisAlignment:
-                                    MainAxisAlignment.spaceBetween,
-                                children: [
-                                  Text('Đã tải $_done / $_total chương'),
-                                  TextButton(
-                                    onPressed: () => _download?.cancel(),
-                                    child: const Text('Hủy'),
-                                  ),
-                                ],
-                              ),
-                            ],
-                          ),
-                        if (saved != null)
-                          const Padding(
-                            padding: EdgeInsets.only(bottom: 12),
-                            child: Text(
-                              'Đang dùng bản đã tải trên thiết bị',
-                              style: TextStyle(fontSize: 12),
-                            ),
-                          ),
                         if (editions.isEmpty)
                           const Padding(
                             padding: EdgeInsets.symmetric(vertical: 32),
@@ -507,62 +359,4 @@ class _AudioBookScreenState extends ConsumerState<AudioBookScreen> {
             ),
     );
   }
-}
-
-class AudioBookDownloadsScreen extends ConsumerStatefulWidget {
-  const AudioBookDownloadsScreen({super.key});
-  @override
-  ConsumerState<AudioBookDownloadsScreen> createState() =>
-      _AudioBookDownloadsState();
-}
-
-class _AudioBookDownloadsState extends ConsumerState<AudioBookDownloadsScreen> {
-  late Future<List<AudioJson>> _items;
-  @override
-  void initState() {
-    super.initState();
-    _items = ref.read(audioBookStoreProvider).saved();
-  }
-
-  @override
-  Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: const Text('Audio book offline')),
-    body: FutureBuilder<List<AudioJson>>(
-      future: _items,
-      builder: (context, snapshot) {
-        if (!snapshot.hasData) {
-          return const Center(child: CircularProgressIndicator());
-        }
-        final items = snapshot.data!;
-        if (items.isEmpty) {
-          return const Center(child: Text('Chưa tải Audio book nào.'));
-        }
-        return ListView.builder(
-          itemCount: items.length,
-          itemBuilder: (context, i) {
-            final e = items[i];
-            return ListTile(
-              leading: const Icon(Icons.headphones),
-              title: Text(e['title']),
-              subtitle: Text('${e['voiceId']} · ${e['readyCount']} chương'),
-              trailing: const Icon(Icons.chevron_right),
-              onTap: () async {
-                await Navigator.push(
-                  context,
-                  MaterialPageRoute<void>(
-                    builder: (_) => AudioBookScreen(novelId: e['novelId']),
-                  ),
-                );
-                if (mounted) {
-                  setState(
-                    () => _items = ref.read(audioBookStoreProvider).saved(),
-                  );
-                }
-              },
-            );
-          },
-        );
-      },
-    ),
-  );
 }

@@ -4,14 +4,15 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
-import 'package:just_audio/just_audio.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:reader_app/features/audiobook/audio_book_controller.dart';
 import 'package:just_audio_background/just_audio_background.dart';
-import 'package:path_provider/path_provider.dart';
 
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
   testWidgets(
-    'Audio book streams, seeks, pauses and plays cached audio offline',
+    'Audio book streams, advances, recovers at position and cancels retry',
     (tester) async {
       await JustAudioBackground.init(
         androidNotificationChannelId: 'reader.audio_book.test',
@@ -48,54 +49,81 @@ void main() {
         );
       }
       final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      var fail = false;
+      var requests = 0;
       server.listen((request) {
+        requests++;
+        if (fail) {
+          request.response.statusCode = 503;
+          request.response.close();
+          return;
+        }
         request.response.headers.contentType = ContentType('audio', 'wav');
         request.response.contentLength = bytes.length;
         request.response.add(bytes);
         request.response.close();
       });
-      final player = AudioPlayer();
-      final file = File(
-        '${(await getTemporaryDirectory()).path}/audiobook-device.wav',
-      );
+      SharedPreferences.setMockInitialValues({});
+      final container = ProviderContainer();
+      final controller = container.read(audioBookControllerProvider);
+      final player = controller.player;
+      final url = 'http://127.0.0.1:${server.port}/chapter.wav';
+      final chapters = [
+        {'id': 'c1', 'assetId': 'a1', 'number': 1, 'title': 'Một', 'url': url},
+        {'id': 'c2', 'assetId': 'a2', 'number': 2, 'title': 'Hai', 'url': url},
+      ];
+      final book = <String, dynamic>{
+        'id': 'test-edition',
+        'novelId': 'test-novel',
+        'title': 'Audio book test',
+        'chapters': chapters,
+      };
+      Future<void> waitUntil(bool Function() predicate) async {
+        for (var i = 0; i < 120 && !predicate(); i++) {
+          await tester.pump(const Duration(milliseconds: 250));
+        }
+        expect(predicate(), true);
+      }
+
       try {
-        await player.setAudioSource(
-          AudioSource.uri(
-            Uri.parse('http://127.0.0.1:${server.port}/chapter.wav'),
-            tag: const MediaItem(id: 'test-stream', title: 'Audio book stream'),
-          ),
-        );
-        player.play();
-        await tester.pump(const Duration(seconds: 1));
+        await controller.play(book, chapters[0]);
+        await waitUntil(() => player.position.inMilliseconds > 100);
         expect(player.duration!.inSeconds, 4);
-        expect(player.position.inMilliseconds, greaterThan(0));
-        await player.pause();
+        await controller.toggle();
         expect(player.playing, false);
         await player.seek(const Duration(seconds: 2));
         expect(player.position.inMilliseconds, greaterThanOrEqualTo(1900));
         await player.setSpeed(1.5);
         expect(player.speed, 1.5);
-        await player.stop();
-        await file.writeAsBytes(bytes, flush: true);
-        await server.close(force: true);
-        await player.setAudioSource(
-          AudioSource.uri(
-            file.uri,
-            tag: const MediaItem(
-              id: 'test-offline',
-              title: 'Audio book offline',
-            ),
-          ),
+        await controller.toggle();
+        await waitUntil(() => controller.chapter?['assetId'] == 'a2');
+        await controller.stop();
+        expect(controller.chapter, null);
+        fail = true;
+        await controller.play(
+          book,
+          chapters[0],
+          position: const Duration(seconds: 2),
         );
-        player.play();
-        await tester.pump(const Duration(seconds: 1));
-        expect(player.playing, true);
-        expect(player.position.inMilliseconds, greaterThan(0));
-        await player.pause();
+        expect(controller.error, isNotNull);
+        fail = false;
+        await waitUntil(() => controller.error == null && player.playing);
+        expect(player.position.inMilliseconds, greaterThanOrEqualTo(1900));
+        await controller.stop();
+        fail = true;
+        await controller.play(book, chapters[0]);
+        expect(controller.error, isNotNull);
+        await controller.stop();
+        final stoppedRequests = requests;
+        fail = false;
+        await tester.pump(const Duration(seconds: 6));
+        expect(player.playing, false);
+        expect(controller.chapter, null);
+        expect(requests, stoppedRequests);
       } finally {
-        await player.dispose();
+        await controller.stop();
+        container.dispose();
         await server.close(force: true);
-        if (await file.exists()) await file.delete();
       }
     },
   );

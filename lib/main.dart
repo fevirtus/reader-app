@@ -7,11 +7,17 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'app/app.dart';
 import 'core/logging/app_provider_observer.dart';
+import 'features/audiobook/audio_book_migration.dart';
 
 void main() {
   runZonedGuarded(
     () async {
       WidgetsFlutterBinding.ensureInitialized();
+      unawaited(
+        removeRetiredAudioDownloads().catchError((Object error) {
+          debugPrint('Audio book cleanup will retry on next launch: $error');
+        }),
+      );
       await JustAudioBackground.init(
         androidNotificationChannelId: "reader.audio_book",
         androidNotificationChannelName: "Audio book",
