@@ -1,3 +1,4 @@
+import '../../audiobook/audio_book_screen.dart';
 import '../../../shared/widgets/book_cover.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -12,8 +13,29 @@ import '../providers/downloads_provider.dart';
 
 /// Tab "Đã tải xuống" trong Tủ sách — liệt kê các truyện đã/đang tải để đọc
 /// ngoại tuyến, cho phép huỷ khi đang tải và xoá khi đã xong.
-class DownloadsTab extends ConsumerWidget {
+class DownloadsTab extends StatelessWidget {
   const DownloadsTab({super.key});
+  @override
+  Widget build(BuildContext context) => Column(
+    children: [
+      ListTile(
+        leading: const Icon(Icons.headphones_outlined),
+        title: const Text('Audio book offline'),
+        trailing: const Icon(Icons.chevron_right),
+        onTap: () => Navigator.push(
+          context,
+          MaterialPageRoute<void>(
+            builder: (_) => const AudioBookDownloadsScreen(),
+          ),
+        ),
+      ),
+      const Expanded(child: _TextDownloadsTab()),
+    ],
+  );
+}
+
+class _TextDownloadsTab extends ConsumerWidget {
+  const _TextDownloadsTab();
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {

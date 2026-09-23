@@ -50,6 +50,8 @@ dependencies:
   sqlite3_flutter_libs: 0.5.28
   path_provider: ^2.1.6
   sqlite3: 2.9.4
+  just_audio: ^0.10.6
+  just_audio_background: ^0.0.1-beta.17
 
 dev_dependencies:
   integration_test:

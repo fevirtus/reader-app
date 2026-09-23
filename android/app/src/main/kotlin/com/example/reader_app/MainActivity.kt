@@ -8,14 +8,14 @@ import android.os.PowerManager
 import android.provider.Settings
 import androidx.core.app.NotificationManagerCompat
 import io.flutter.embedding.engine.FlutterEngine
-import io.flutter.embedding.android.FlutterActivity
+import com.ryanheise.audioservice.AudioServiceActivity
 import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodChannel
 import com.example.reader_app.tts.ReaderTtsMediaBridge
 import com.example.reader_app.tts.ReaderTtsMediaService
 import com.example.reader_app.tts.ReaderTtsStartRequest
 
-class MainActivity : FlutterActivity() {
+class MainActivity : AudioServiceActivity() {
 	private val channelName = "reader_app/tts_background"
 	private val mediaChannelName = "reader_app/tts_media"
 	private val mediaEventsChannelName = "reader_app/tts_media_events"

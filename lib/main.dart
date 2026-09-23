@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:ui';
+import 'package:just_audio_background/just_audio_background.dart';
 
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -9,8 +10,13 @@ import 'core/logging/app_provider_observer.dart';
 
 void main() {
   runZonedGuarded(
-    () {
+    () async {
       WidgetsFlutterBinding.ensureInitialized();
+      await JustAudioBackground.init(
+        androidNotificationChannelId: "reader.audio_book",
+        androidNotificationChannelName: "Audio book",
+        androidNotificationOngoing: true,
+      );
 
       FlutterError.onError = (details) {
         FlutterError.presentError(details);
