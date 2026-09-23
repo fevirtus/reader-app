@@ -25,11 +25,13 @@ class AudioBookController extends ChangeNotifier {
     _states = player.playerStateStream.listen((s) {
       if (_disposed) return;
       if (!loading && s.processingState == ProcessingState.ready) {
-        _wantsPlay = s.playing; // Includes pause from the lock-screen controls.
+        _wantsPlay = s.playing && previewVoiceId == null;
       }
       notifyListeners();
       if (!loading && s.processingState == ProcessingState.completed) {
         _wantsPlay = false;
+        previewVoiceId = null;
+        notifyListeners();
         unawaited(save());
       }
     });
@@ -83,6 +85,8 @@ class AudioBookController extends ChangeNotifier {
       ),
     ),
   );
+  String? previewVoiceId;
+  double? _speedBeforePreview;
   AudioJson? edition;
   AudioJson? chapter;
   List<AudioJson> _queue = [];
@@ -121,6 +125,7 @@ class AudioBookController extends ChangeNotifier {
     _retry = null;
     await save();
     if (generation != _generation || _disposed) return;
+    previewVoiceId = null;
     loading = true;
     _wantsPlay = true;
     error = null;
@@ -129,6 +134,8 @@ class AudioBookController extends ChangeNotifier {
       await ref.read(ttsProvider.notifier).stop();
       if (generation != _generation) return;
       await player.stop();
+      if (generation != _generation) return;
+      await _restoreSpeed();
       if (generation != _generation) return;
       _account = account;
       final prefs = await SharedPreferences.getInstance();
@@ -188,7 +195,55 @@ class AudioBookController extends ChangeNotifier {
     }
   }
 
+  Future<void> previewVoice(AudioJson voice) async {
+    if (voice['previewUrl'] == null) return;
+    if (previewVoiceId == voice['id']) {
+      await stop();
+      return;
+    }
+    final stopping = stop();
+    final generation = _generation;
+    await stopping;
+    if (generation != _generation || _disposed) return;
+    _speedBeforePreview = player.speed;
+    previewVoiceId = voice['id'];
+    loading = true;
+    error = null;
+    notifyListeners();
+    try {
+      await ref.read(ttsProvider.notifier).stop();
+      if (generation != _generation || _disposed) return;
+      await player
+          .setAudioSource(
+            AudioSource.uri(
+              Uri.parse(AppConfig.baseUrl).resolve(voice['previewUrl']),
+              tag: MediaItem(
+                id: 'voice-preview:${voice['id']}',
+                title: 'Nghe thử · ${voice['name']}',
+              ),
+            ),
+          )
+          .timeout(const Duration(seconds: 20));
+      if (generation != _generation || _disposed) return;
+      await player.setSpeed(1);
+      unawaited(player.play().catchError((Object e) => _failed(generation)));
+    } catch (_) {
+      _failed(generation);
+    } finally {
+      if (generation == _generation && !_disposed) {
+        loading = false;
+        notifyListeners();
+      }
+    }
+  }
+
   void _failed(int generation) {
+    if (!_disposed && generation == _generation && previewVoiceId != null) {
+      previewVoiceId = null;
+      error = 'Không phát được đoạn nghe thử. Vui lòng thử lại.';
+      notifyListeners();
+      return;
+    }
     if (_disposed || generation != _generation || !_wantsPlay) return;
     error = 'Kết nối bị gián đoạn. Sẽ tự phát tiếp khi kết nối trở lại.';
     notifyListeners();
@@ -228,13 +283,24 @@ class AudioBookController extends ChangeNotifier {
     }
   }
 
+  Future<void> _restoreSpeed() async {
+    final speed = _speedBeforePreview;
+    _speedBeforePreview = null;
+    if (speed != null) await player.setSpeed(speed);
+  }
+
   Future<void> stop() async {
-    ++_generation;
+    final generation = ++_generation;
     _wantsPlay = false;
     _retry?.cancel();
     _retry = null;
     await save();
+    if (generation != _generation) return;
     await player.stop();
+    if (generation != _generation) return;
+    await _restoreSpeed();
+    if (generation != _generation) return;
+    previewVoiceId = null;
     edition = null;
     chapter = null;
     _queue = [];

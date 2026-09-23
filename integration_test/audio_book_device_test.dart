@@ -120,6 +120,35 @@ void main() {
         expect(player.playing, false);
         expect(controller.chapter, null);
         expect(requests, stoppedRequests);
+        final prefs = await SharedPreferences.getInstance();
+        final progressBefore = prefs.getString(
+          controller.key(controller.account, 'test-novel'),
+        );
+        final speedBefore = player.speed;
+        final voice = <String, dynamic>{
+          'id': 'sample',
+          'name': 'Giọng thử',
+          'previewUrl': url,
+        };
+        await controller.previewVoice(voice);
+        await waitUntil(
+          () => player.playing && player.position.inMilliseconds > 100,
+        );
+        expect(controller.edition, null);
+        expect(controller.chapter, null);
+        expect(player.speed, 1);
+        expect(
+          prefs.getString(controller.key(controller.account, 'test-novel')),
+          progressBefore,
+        );
+        await controller.previewVoice(voice);
+        expect(player.playing, false);
+        expect(player.speed, speedBefore);
+        final first = controller.previewVoice(voice);
+        final second = controller.previewVoice({...voice, 'id': 'second'});
+        await Future.wait([first, second]);
+        expect(controller.previewVoiceId, 'second');
+        await controller.stop();
       } finally {
         await controller.stop();
         container.dispose();

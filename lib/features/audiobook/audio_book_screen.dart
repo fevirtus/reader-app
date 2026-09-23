@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/network/providers.dart';
 import 'audio_book_controller.dart';
+import 'audio_book_voice_picker.dart';
 
 class AudioBookScreen extends ConsumerStatefulWidget {
   const AudioBookScreen({super.key, required this.novelId});
@@ -164,37 +165,54 @@ class _AudioBookScreenState extends ConsumerState<AudioBookScreen> {
                             ),
                           ),
                         const SizedBox(height: 16),
-                        if (_voices.isNotEmpty)
-                          Row(
-                            children: [
-                              Expanded(
-                                child: DropdownButtonFormField<String>(
-                                  initialValue: _requestVoice,
-                                  decoration: const InputDecoration(
-                                    labelText: 'Giọng muốn nghe',
-                                    border: OutlineInputBorder(),
-                                  ),
-                                  items: _voices
-                                      .map(
-                                        (v) => DropdownMenuItem(
-                                          value: v['id'] as String,
-                                          child: Text(v['name']),
+                        if (_voices.isNotEmpty) ...[
+                          Card(
+                            child: ListTile(
+                              leading: const Icon(
+                                Icons.record_voice_over_outlined,
+                              ),
+                              title: Text(
+                                _voices
+                                        .where((v) => v['id'] == _requestVoice)
+                                        .firstOrNull?['name'] ??
+                                    'Chọn giọng đọc',
+                              ),
+                              subtitle: Text(
+                                '${_voices.length} giọng · Chọn và nghe thử',
+                              ),
+                              trailing: const Icon(Icons.chevron_right),
+                              onTap: () async {
+                                final choice =
+                                    await showModalBottomSheet<String>(
+                                      context: context,
+                                      isScrollControlled: true,
+                                      showDragHandle: true,
+                                      builder: (_) => SizedBox(
+                                        height:
+                                            MediaQuery.sizeOf(context).height *
+                                            .8,
+                                        child: AudioBookVoicePicker(
+                                          voices: _voices,
+                                          selected: _requestVoice,
                                         ),
-                                      )
-                                      .toList(),
-                                  onChanged: (v) =>
-                                      setState(() => _requestVoice = v!),
-                                ),
-                              ),
-                              const SizedBox(width: 12),
-                              FilledButton(
-                                onPressed: _requesting ? null : _request,
-                                child: Text(
-                                  _requesting ? 'Đang gửi…' : 'Yêu cầu tạo',
-                                ),
-                              ),
-                            ],
+                                      ),
+                                    );
+                                if (mounted && choice != null) {
+                                  setState(() => _requestVoice = choice);
+                                }
+                              },
+                            ),
                           ),
+                          const SizedBox(height: 8),
+                          FilledButton(
+                            onPressed: _requesting ? null : _request,
+                            child: Text(
+                              _requesting
+                                  ? 'Đang gửi…'
+                                  : 'Yêu cầu tạo Audio book',
+                            ),
+                          ),
+                        ],
                         const SizedBox(height: 16),
                         Wrap(
                           spacing: 8,
