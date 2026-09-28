@@ -1,4 +1,3 @@
-import '../../audiobook/audio_book_screen.dart';
 import '../../../core/sync/user_sync.dart';
 import 'dart:async';
 
@@ -91,16 +90,6 @@ class _NovelDetailScreenState extends ConsumerState<NovelDetailScreen> {
         appBar: AppBar(
           title: const Text('Chi tiết truyện'),
           actions: [
-            IconButton(
-              tooltip: 'Audio book',
-              icon: const Icon(Icons.headphones_outlined),
-              onPressed: () => Navigator.push(
-                context,
-                MaterialPageRoute<void>(
-                  builder: (_) => AudioBookScreen(novelId: novel.id),
-                ),
-              ),
-            ),
             _DownloadAction(novelId: novel.id),
           ],
         ),

@@ -1,4 +1,3 @@
-import '../../audiobook/audio_book_screen.dart';
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
@@ -1588,27 +1587,6 @@ class _ReaderScreenState extends ConsumerState<ReaderScreen>
                                                 .titleLarge
                                                 ?.copyWith(
                                                   color: readerTextColor,
-                                                ),
-                                          ),
-                                          const SizedBox(height: 12),
-                                          TextButton.icon(
-                                            icon: const Icon(
-                                              Icons.headphones_outlined,
-                                            ),
-                                            label: const Text(
-                                              'Nghe Audio book chương này',
-                                            ),
-                                            onPressed: () =>
-                                                Navigator.of(context).push(
-                                                  MaterialPageRoute(
-                                                    builder: (_) =>
-                                                        AudioBookScreen(
-                                                          novelId:
-                                                              chapter.novelId,
-                                                          initialChapterId:
-                                                              chapter.id,
-                                                        ),
-                                                  ),
                                                 ),
                                           ),
                                           const SizedBox(height: 12),

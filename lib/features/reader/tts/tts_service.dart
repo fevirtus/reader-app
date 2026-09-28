@@ -1,5 +1,4 @@
 import 'dart:async';
-import '../../../core/audio/playback_exclusion.dart';
 import 'dart:io';
 
 import 'package:flutter/services.dart';
@@ -680,8 +679,6 @@ class TtsNotifier extends StateNotifier<TtsState> {
     bool includeTitle = true,
   }) async {
     final command = ++_commandGeneration;
-    final stopAudioBook = PlaybackExclusion.stopAudioBook;
-    if (stopAudioBook != null) await stopAudioBook();
     if (!_initialized) {
       await (_initFuture ?? _init());
     }
@@ -903,8 +900,6 @@ class TtsNotifier extends StateNotifier<TtsState> {
 
   Future<void> resume() async {
     final command = ++_commandGeneration;
-    final stopAudioBook = PlaybackExclusion.stopAudioBook;
-    if (stopAudioBook != null) await stopAudioBook();
     if (!mounted || command != _commandGeneration) return;
     if (_useNativeAndroidMediaService) {
       await _mediaChannel.invokeMethod<void>('resume');

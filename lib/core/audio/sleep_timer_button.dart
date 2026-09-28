@@ -101,7 +101,7 @@ class _SleepTimerSheetState extends ConsumerState<_SleepTimerSheet> {
             Text('Hẹn giờ tắt', style: theme.textTheme.titleLarge),
             const SizedBox(height: 8),
             Text(
-              'Áp dụng cho TTS và Audio book. Hết giờ sẽ tạm dừng và giữ vị trí nghe.',
+              'Hết giờ sẽ tạm dừng đọc và giữ vị trí nghe.',
               style: theme.textTheme.bodyMedium,
             ),
             if (remaining != null)

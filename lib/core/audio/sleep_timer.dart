@@ -3,25 +3,21 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../features/reader/tts/tts_service.dart';
-import 'playback_exclusion.dart';
 
 final sleepTimerProvider = ChangeNotifierProvider<SleepTimer>((ref) {
   return SleepTimer(
     onExpire: () async {
-      // Both commands start immediately, before awaiting platform or storage I/O.
       final tts = ref.read(ttsProvider.notifier);
       tts.clearPendingAutoStartChapter();
       final state = ref.read(ttsProvider);
-      await Future.wait([
-        if (state.status != TtsStatus.idle || state.isBuffering) tts.pause(),
-        if (PlaybackExclusion.pauseAudioBook != null)
-          PlaybackExclusion.pauseAudioBook!(),
-      ]);
+      if (state.status != TtsStatus.idle || state.isBuffering) {
+        await tts.pause();
+      }
     },
   );
 });
 
-/// One monotonic deadline across screens, chapters, and playback engines.
+/// One monotonic deadline across screens and chapters.
 class SleepTimer extends ChangeNotifier {
   SleepTimer({required this.onExpire, bool? nativeAndroid})
     : _nativeAndroid =
